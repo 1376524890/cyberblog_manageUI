@@ -15,3 +15,4 @@ test-fixtures/
 .idea/
 .DS_Store
 ._*
+.test-fixtures-old-*/
