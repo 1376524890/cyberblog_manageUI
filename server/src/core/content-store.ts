@@ -116,6 +116,7 @@ async function readParsed(
 }
 
 export async function getOne(collection: CollectionName, slug: string): Promise<PostFile> {
+	if (!slug || slug.includes("..") || /[\\/\0]/.test(slug)) throw new ApiError(400,"BAD_REQUEST","非法文件标识");
 	const f = await readParsed(collection, slug);
 	if (!f) throw new ApiError(404, "NOT_FOUND", `文章不存在: ${slug}`);
 	return f;
@@ -130,15 +131,9 @@ export async function checkVersion(collection: CollectionName, slug: string, exp
 			expectedHead: expected.head,
 		});
 	}
-	const abs = path.join(collectionDir(collection), `${slug}.md`);
-	if (fs.existsSync(abs)) {
-		const mtime = await statMtimeMs(abs);
-		if (Math.abs(mtime - expected.fileMtimeMs) > 1000) {
-			throw new ApiError(409, "CONFLICT", "文件已被他处修改，请刷新后重试", {
-				currentMtimeMs: mtime,
-				expectedMtimeMs: expected.fileMtimeMs,
-			});
-		}
+	const current = await getOne(collection, slug);
+	if (Math.abs(current.version.fileMtimeMs - expected.fileMtimeMs) > 0.01) {
+		throw new ApiError(409, "CONFLICT", "文件已被他处修改，请刷新后重试");
 	}
 }
 
@@ -169,9 +164,10 @@ export async function writePost(collection: CollectionName, input: WriteInput): 
 	}
 	const dir = collectionDir(collection);
 	const abs = path.join(dir, `${input.slug}.md`);
-	if (fs.existsSync(abs)) {
+	if (fs.existsSync(abs) || fs.existsSync(path.join(dir, `${input.slug}.mdx`))) {
 		throw new ApiError(409, "CONFLICT", `文件已存在: ${input.slug}`);
 	}
+	await fs.promises.mkdir(dir, {recursive:true});
 	const content = buildFileContent(collection, input.data, input.extraFields ?? {}, input.body);
 	await atomicWrite(abs, content);
 	return (await readParsed(collection, input.slug))!;

@@ -63,16 +63,17 @@ function scalar(v: unknown): string {
 	if (typeof v === "number") return String(v);
 	if (v instanceof Date) return formatDate(v);
 	if (typeof v === "string") {
-		return needsQuotes(v) ? `'${v.replace(/'/g, "''")}'` : v;
+		return needsQuotes(v) ? JSON.stringify(v) : v;
 	}
 	return JSON.stringify(v);
 }
 
 export function formatDate(d: Date | string): string {
-	const dt = d instanceof Date ? d : new Date(`${d}T00:00:00+08:00`);
-	const y = dt.getFullYear();
-	const m = String(dt.getMonth() + 1).padStart(2, "0");
-	const day = String(dt.getDate()).padStart(2, "0");
+	if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+	const dt = d instanceof Date ? d : new Date(d);
+	const y = dt.getUTCFullYear();
+	const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+	const day = String(dt.getUTCDate()).padStart(2, "0");
 	return `${y}-${m}-${day}`;
 }
 

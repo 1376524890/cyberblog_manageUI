@@ -52,7 +52,7 @@ function defaultCommitMessage(action: "add" | "update" | "remove", collection: C
 }
 
 function resolveSlugOrThrow(slug: string) {
-	if (slug.includes("..") || slug.includes("/")) {
+	if (!slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
 		throw new ApiError(400, "BAD_REQUEST", "非法 slug");
 	}
 }
@@ -69,7 +69,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 			items = items.filter(
 				(p) =>
 					String(p.data.title ?? "").toLowerCase().includes(kw) ||
-					String(p.data.description ?? "").toLowerCase().includes(kw),
+					String(p.data.description ?? "").toLowerCase().includes(kw) || p.slug.toLowerCase().includes(kw),
 			);
 		}
 		if (q.category)
@@ -87,11 +87,14 @@ export function collectionRoutes(collection: CollectionName): Hono {
 		const sort = q.sort ?? "published_desc";
 		if (sort === "title_asc")
 			items.sort((a, b) => String(a.data.title ?? "").localeCompare(String(b.data.title ?? "")));
+		if (sort === "published_desc")
+			items.sort((a,b)=>String(b.data.published??"").localeCompare(String(a.data.published??"")) || a.slug.localeCompare(b.slug));
 		if (sort === "published_asc")
 			items.sort((a, b) => String(a.data.published ?? "").localeCompare(String(b.data.published ?? "")));
 
-		const page = Math.max(1, Number(q.page ?? 1));
-		const pageSize = Math.min(100, Math.max(1, Number(q.pageSize ?? 20)));
+		const pagination = z.object({page:z.coerce.number().int().min(1).default(1),pageSize:z.coerce.number().int().min(1).max(100).default(20)}).safeParse({page:q.page,pageSize:q.pageSize});
+		if (!pagination.success) throw new ApiError(422, "VALIDATION_FAILED", "分页参数必须为正整数，pageSize 最大 100");
+		const {page, pageSize} = pagination.data;
 		const total = items.length;
 		const slice = items.slice((page - 1) * pageSize, page * pageSize);
 		return c.json({
@@ -145,6 +148,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 	// POST /
 	app.post("/", async (c) => {
 		const req = writeBodySchema.parse(await c.req.json());
+		validateCommit(req);
 		let slug = req.slug ?? "";
 		if (collection === "dynamic" && !slug) slug = dynamicSlug();
 		resolveSlugOrThrow(slug);
@@ -178,7 +182,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 			if (req.commitMessage && !isValidCommitMessage(req.commitMessage)) {
 				throw new ApiError(422, "VALIDATION_FAILED", "commitMessage 不符合 Conventional Commits");
 			}
-			const r = await commitPaths([file.filePath], msg);
+			const r = await commitPaths(collection === "posts" ? [file.filePath, `src/content/posts/images/${file.slug}`] : [file.filePath], msg);
 			committed = r.committed;
 			commitSha = r.commitSha;
 			pendingPush = r.pendingPush;
@@ -203,6 +207,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 		const slug = c.req.param("slug");
 		resolveSlugOrThrow(slug);
 		const req = updateBodySchema.parse(await c.req.json());
+		validateCommit(req);
 		await checkVersion(collection, slug, req.expected);
 		const existing = await getOne(collection, slug);
 		// 部分更新语义：未传字段保持原值 → 合并后再整体校验
@@ -219,7 +224,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 			});
 		}
 		const file = await updatePost(collection, slug, {
-			data: mergedInput,
+			data: { ...mergedInput, ...Object.fromEntries(Object.entries(req.data).filter(([,v])=>v===null)) },
 			extraFields: req.extraFields,
 			body: req.body ?? existing.body,
 		});
@@ -231,7 +236,7 @@ export function collectionRoutes(collection: CollectionName): Hono {
 			if (req.commitMessage && !isValidCommitMessage(req.commitMessage)) {
 				throw new ApiError(422, "VALIDATION_FAILED", "commitMessage 不符合 Conventional Commits");
 			}
-			const r = await commitPaths([file.filePath], msg);
+			const r = await commitPaths(collection === "posts" ? [file.filePath, `src/content/posts/images/${file.slug}`] : [file.filePath], msg);
 			committed = r.committed;
 			commitSha = r.commitSha;
 			pendingPush = r.pendingPush;
@@ -274,3 +279,7 @@ function stripDynamicTitle(data: Record<string, unknown>): Record<string, unknow
 }
 
 export { slugify };
+
+function validateCommit(req:{commit:boolean;commitMessage?:string}) {
+ if(req.commit && req.commitMessage && !isValidCommitMessage(req.commitMessage)) throw new ApiError(422,"VALIDATION_FAILED","commitMessage 不符合 Conventional Commits");
+}

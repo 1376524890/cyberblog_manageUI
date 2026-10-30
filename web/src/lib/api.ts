@@ -29,9 +29,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 		credentials: "include",
 	});
 	const text = await res.text();
-	const json = text ? (JSON.parse(text) as unknown) : {};
+	let json: unknown = {};
+	try { json = text ? JSON.parse(text) : {}; } catch { throw new ApiClientError(res.status, "INVALID_RESPONSE", "服务器返回了异常响应，请稍后重试"); }
 	if (!res.ok) {
-		const err = (json as ApiErrorBody).error;
+		const err = (json as ApiErrorBody)?.error;
 		// 会话过期/未认证：跳回登录页（避免停留在空白主界面）
 		if (res.status === 401 && !path.startsWith("/auth/")) {
 			location.hash = "/";
@@ -65,5 +66,10 @@ export function navigate(hash: string): void {
 }
 
 export function currentRoute(): string {
-	return location.hash.slice(1) || "/posts";
+	return location.hash.slice(1).split("?")[0] || "/overview";
 }
+
+let unsaved = false;
+export const setUnsavedChanges = (value: boolean) => { unsaved = value; };
+export const hasUnsavedChanges = () => unsaved;
+export const contentSaved = () => window.dispatchEvent(new Event('cms:saved'));

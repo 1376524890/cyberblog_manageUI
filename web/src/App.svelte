@@ -1,169 +1,55 @@
 <script lang="ts">
-	import { onMount } from "svelte";
-	import { currentRoute, api } from "./lib/api.ts";
-	import Login from "./pages/Login.svelte";
-	import PostList from "./pages/PostList.svelte";
-	import PostEditor from "./pages/PostEditor.svelte";
-	import PostNew from "./pages/PostNew.svelte";
-
-	let route = currentRoute();
-	let authed = false;
-	let checked = false;
-	let pendingPushCount = 0;
-	let pubMsg = "";
-
-	async function refreshGitStatus() {
-		try {
-			const st = await api.get<{ pendingPushCount: number }>("/git/status");
-			pendingPushCount = st.pendingPushCount;
-		} catch {
-			/* ignore */
-		}
-	}
-
-	async function publishPending() {
-		pubMsg = "";
-		try {
-			const r = await api.post<{ pushedCount: number }>("/publish", {});
-			pubMsg = `已推送 ${r.pushedCount} 个提交`;
-			pendingPushCount = 0;
-		} catch (e) {
-			pubMsg = `失败: ${e instanceof Error ? e.message : String(e)}`;
-		}
-	}
-
-	function onHashChange() {
-		route = currentRoute();
-	}
-
-	onMount(() => {
-		window.addEventListener("hashchange", onHashChange);
-		void checkAuth();
-		const timer = setInterval(refreshGitStatus, 30_000);
-		return () => {
-			clearInterval(timer);
-			window.removeEventListener("hashchange", onHashChange);
-		};
-	});
-
-	async function checkAuth(): Promise<void> {
-		try {
-			await api.get("/auth/me");
-			authed = true;
-			await refreshGitStatus();
-		} catch {
-			authed = false;
-		} finally {
-			checked = true;
-		}
-	}
+ import {onMount} from 'svelte';
+ import {api,currentRoute,hasUnsavedChanges,setUnsavedChanges} from './lib/api.ts';
+ import {collections, type Collection, messageOf} from './lib/content.ts';
+ import Icon from './components/Icon.svelte';
+ import Login from './pages/Login.svelte';
+ import PostList from './pages/PostList.svelte';
+ import PostEditor from './pages/PostEditor.svelte';
+ import PostNew from './pages/PostNew.svelte';
+ import Overview from './pages/Overview.svelte';
+ import SeriesPage from './pages/SeriesPage.svelte';
+ import PublishPage from './pages/PublishPage.svelte';
+ import './style.css';
+ let route=currentRoute(), authed=false, checked=false, pending:number|null=null, gitError='', notice='';
+ $: section=route.split('/')[1];
+ $: collection=(Object.keys(collections).includes(section) ? section : 'posts') as Collection;
+ $: pageTitle=section==='overview'?'工作台':section==='series'?'系列管理':section==='publish'?'发布中心':collections[collection].label;
+ async function refresh(){if(!authed)return;try{const s=await api.get<{pendingPushCount:number;healthy:boolean;lockedReason:string|null}>('/git/status');pending=s.healthy?s.pendingPushCount:null;gitError=s.lockedReason??'';}catch(e){gitError=messageOf(e);pending=null;}}
+ async function logout(){if(hasUnsavedChanges()&&!confirm('有尚未保存的修改，确定退出？'))return;try{await api.post('/auth/logout');setUnsavedChanges(false);authed=false;}catch(e){notice=messageOf(e);}}
+ function changeRoute(){const next=currentRoute();if(next===route)return;if(hasUnsavedChanges()&&!confirm('有尚未保存的修改，确定离开当前页面？')){history.replaceState(null,'',`#${route}`);return;}setUnsavedChanges(false);route=next;}
+ onMount(()=>{window.addEventListener('hashchange',changeRoute);window.addEventListener('cms:saved',refresh);void api.get('/auth/me').then(()=>{authed=true;void refresh();}).catch(()=>{}).finally(()=>checked=true);const timer=setInterval(refresh,30000);return()=>{clearInterval(timer);window.removeEventListener('hashchange',changeRoute);window.removeEventListener('cms:saved',refresh);};});
 </script>
-
-{#if !checked}
-	<p class="boot">加载中…</p>
-{:else if !authed}
-	<Login />
+{#if !checked}<div class="boot">正在连接内容工作台…</div>
+{:else if !authed}<Login />
 {:else}
-	<div class="shell">
-		<header>
-			<span class="brand">CyberBlog 内容管理</span>
-			<nav>
-				<a href="#/posts">文章</a>
-				<a href="#/new">新建</a>
-			</nav>
-			<div class="git-bar">
-				{#if pendingPushCount > 0}
-					<button on:click={publishPending}>待推送 {pendingPushCount} 提交 · 点击推送</button>
-				{:else}
-					<span class="clean">✓ 已同步</span>
-				{/if}
-				{#if pubMsg}<span class="pub-msg">{pubMsg}</span>{/if}
-			</div>
-		</header>
-		<main>
-			{#if route === "/posts"}
-				<PostList />
-			{:else if route === "/new"}
-				<PostNew />
-			{:else if route.startsWith("/posts/")}
-				<PostEditor />
-			{:else}
-				<PostList />
-			{/if}
-		</main>
-	</div>
+<div class="app-shell">
+ <aside class="sidebar">
+  <a class="brand" href="#/overview"><span class="brand-mark"><Icon name="code" size={23}/></span><span>Cyber先锋社<small>CONTENT STUDIO</small></span></a>
+  <div class="workspace-label">管理空间 <span> / </span> 博客</div>
+  <nav aria-label="主导航">
+   <a class:active={section==='overview'} href="#/overview"><Icon name="dashboard"/>工作台</a>
+   <div class="nav-label">内容管理</div>
+   {#each Object.entries(collections) as [key,value]}<a class:active={section===key || (key==='posts'&&section==='new')} href={`#/${key}`}><Icon name={value.icon}/>{value.label}</a>{/each}
+   <a class:active={section==='series'} href="#/series"><Icon name="series"/>系列管理</a>
+   <div class="nav-label">站点发布</div>
+   <a class:active={section==='publish'} href="#/publish"><Icon name="publish"/>发布中心{#if pending}<span class="nav-count">{pending}</span>{/if}</a>
+  </nav>
+  <div class="sidebar-bottom"><a href="https://www.cyberpioneer.club/" target="_blank" rel="noreferrer"><span>访问博客<small>www.cyberpioneer.club</small></span><Icon name="arrow" size={17}/></a><div class="account"><span class="avatar">C</span><span>管理员<small>Cyber先锋社</small></span><button class="icon-button" aria-label="退出登录" on:click={logout}><Icon name="logout" size={18}/></button></div></div>
+ </aside>
+ <div class="workspace">
+  <header class="topbar"><div>管理空间 <span>/</span> <strong>{pageTitle}</strong></div><div class="topbar-actions"><a class="sync-status" class:warning={pending===null||!!gitError} href="#/publish"><span class="status-dot"></span>{pending===null?'状态待确认':pending?`${pending} 个提交待发布`:'仓库已同步'}</a><button class="mobile-logout icon-button" aria-label="退出登录" on:click={logout}><Icon name="logout" size={17}/></button></div></header>
+  <main>{#if notice}<div class="err" role="alert">{notice}</div>{/if}
+   {#key route}
+    {#if section==='overview'}<Overview />
+    {:else if section==='series'}<SeriesPage />
+    {:else if section==='publish'}<PublishPage />
+    {:else if route==='/new'}<PostNew />
+    {:else if route.split('/')[2]}<PostEditor {collection} slug={decodeURIComponent(route.split('/')[2])}/>
+    {:else}<PostList {collection}/>{/if}
+   {/key}
+  </main>
+  <footer>CYBERPIONEER <span>探索 · 记录 · 分享</span></footer>
+ </div>
+</div>
 {/if}
-
-<style>
-	:global(:root) {
-		color-scheme: light;
-	}
-	:global(body) {
-		margin: 0;
-		background: #f4f6f9;
-		font-family:
-			system-ui,
-			-apple-system,
-			sans-serif;
-		color: #1e293b;
-	}
-	.boot {
-		text-align: center;
-		color: #64748b;
-		margin-top: 60px;
-	}
-	.shell {
-		max-width: 1200px;
-		margin: 0 auto;
-		padding: 16px 20px;
-	}
-	header {
-		display: flex;
-		align-items: center;
-		gap: 24px;
-		padding: 12px 0;
-		margin-bottom: 8px;
-		border-bottom: 1px solid #e2e8f0;
-	}
-	.brand {
-		font-weight: 700;
-		color: #1a1a2e;
-	}
-	nav {
-		display: flex;
-		gap: 16px;
-	}
-	nav a {
-		color: #475569;
-		text-decoration: none;
-		font-size: 14px;
-	}
-	nav a:hover {
-		color: #2563eb;
-	}
-	.git-bar {
-		margin-left: auto;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 13px;
-	}
-	.git-bar button {
-		background: #fef3c7;
-		border: 1px solid #fcd34d;
-		color: #92400e;
-		border-radius: 8px;
-		padding: 6px 12px;
-		cursor: pointer;
-		font-size: 13px;
-	}
-	.clean {
-		color: #059669;
-	}
-	.pub-msg {
-		color: #64748b;
-	}
-	main {
-		padding: 8px 0 40px;
-	}
-</style>

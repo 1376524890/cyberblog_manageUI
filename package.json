@@ -8,10 +8,10 @@
 		"install:all": "pnpm --dir server install && pnpm --dir web install",
 		"dev:server": "pnpm --dir server dev",
 		"dev:web": "pnpm --dir web dev",
-		"build": "pnpm --dir server build && pnpm --dir web build",
+		"build": "pnpm --dir server typecheck && pnpm --dir web build",
 		"typecheck": "pnpm --dir server typecheck && pnpm --dir web typecheck",
 		"fixtures": "node scripts/make-fixtures.mjs",
-		"acceptance": "node scripts/acceptance.mjs"
+		"acceptance": "bash scripts/run-acceptance.sh"
 	},
 	"engines": {
 		"node": ">=22"

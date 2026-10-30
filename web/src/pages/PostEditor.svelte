@@ -1,418 +1,74 @@
 <script lang="ts">
-	import { onMount } from "svelte";
-	import { api, navigate } from "../lib/api.ts";
-
-	interface PostDetail {
-		slug: string;
-		data: Record<string, unknown>;
-		extraFields: Record<string, unknown>;
-		body: string;
-		version: { head: string; fileMtimeMs: number };
-		postUrl: string | null;
-	}
-
-	interface Series {
-		name: string;
-		count: number;
-	}
-
-	let post: PostDetail | null = null;
-	let meta: {
-		categories: { name: string }[];
-		tags: { name: string }[];
-	} | null = null;
-	let seriesList: Series[] = [];
-	let body = "";
-	let title = "";
-	let published = "";
-	let updated = "";
-	let description = "";
-	let category = "";
-	let tagsInput = "";
-	let series = "";
-	let seriesOrder: number | null = null;
-	let draft = false;
-	let pinned = false;
-	let password = "";
-	let showPreview = false;
-	let previewHtml = "";
-	let saving = false;
-	let publishAfter = false;
-	let message = "";
-	let error = "";
-	let images: { name: string; sizeKB: number; refPath: string }[] = [];
-
-	$: slug = post?.slug ?? "";
-
-	async function load(slug: string) {
-		error = "";
-		post = await api.get<PostDetail>(`/posts/${slug}`);
-		const d = post.data;
-		title = String(d.title ?? "");
-		published = String(d.published ?? "");
-		updated = d.updated ? String(d.updated) : "";
-		description = String(d.description ?? "");
-		category = String(d.category ?? "");
-		tagsInput = Array.isArray(d.tags) ? (d.tags as string[]).join(", ") : "";
-		series = String(d.series ?? "");
-		seriesOrder = typeof d.seriesOrder === "number" ? d.seriesOrder : null;
-		draft = Boolean(d.draft);
-		pinned = Boolean(d.pinned);
-		password = String(d.password ?? "");
-		body = post.body;
-		await refreshImages();
-	}
-
-	async function refreshImages() {
-		if (!post) return;
-		try {
-			const res = await api.get<{ images: typeof images }>(`/posts/${post.slug}/images`);
-			images = res.images;
-		} catch {
-			images = [];
-		}
-	}
-
-	async function save(publish: boolean) {
-		if (!post) return;
-		saving = true;
-		error = "";
-		message = "";
-		try {
-			const data: Record<string, unknown> = {
-				title,
-				published,
-				description,
-				category: category || null,
-				tags: tagsInput
-					.split(/[,，]/)
-					.map((t) => t.trim())
-					.filter(Boolean),
-				series,
-				draft,
-				pinned,
-			};
-			if (updated) data.updated = updated;
-			if (seriesOrder !== null) data.seriesOrder = seriesOrder;
-			const res = await api.put<{
-				version: { head: string; fileMtimeMs: number };
-				committed: boolean;
-				pendingPush: boolean;
-			}>(`/posts/${post.slug}`, {
-				data,
-				body,
-				expected: post.version,
-				commit: true,
-			});
-			post.version = res.version;
-			message = res.committed
-				? res.pendingPush
-					? "已保存并提交，待推送"
-					: "已保存并提交"
-				: "已保存";
-			if (publish) await doPublish();
-		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function doPublish() {
-		try {
-			const res = await api.post<{ pushedCount: number }>("/publish", {});
-			message = `已推送 ${res.pushedCount} 个提交，Cloudflare Pages 将自动构建`;
-		} catch (e) {
-			error = `发布失败: ${e instanceof Error ? e.message : String(e)}`;
-		}
-	}
-
-	async function uploadImage(ev: Event) {
-		const input = ev.target as HTMLInputElement;
-		if (!input.files?.length || !post) return;
-		for (const file of Array.from(input.files)) {
-			const form = new FormData();
-			form.append("file", file);
-			try {
-				const r = await api.upload<{ refPath: string }>(`/posts/${post.slug}/images`, form);
-				body += `\n![](${r.refPath})\n`;
-			} catch (e) {
-				error = `图片上传失败: ${e instanceof Error ? e.message : String(e)}`;
-			}
-		}
-		await refreshImages();
-		input.value = "";
-	}
-
-	async function togglePreview() {
-		showPreview = !showPreview;
-		if (showPreview) {
-			const { marked } = await import("marked");
-			previewHtml = await marked.parse(body);
-		}
-	}
-
-	onMount(async () => {
-		const m = await api.get<{ categories: { name: string }[]; tags: { name: string }[] }>(
-			"/meta",
-		);
-		meta = m;
-		const s = await api.get<{ items: Series[] }>("/series");
-		seriesList = s.items;
-		const slug = location.hash.split("/")[2];
-		if (slug) await load(slug);
-		else navigate("/posts");
-	});
+ import {onMount,tick} from 'svelte';
+ import {api,navigate,setUnsavedChanges,contentSaved,ApiClientError} from '../lib/api.ts';
+ import {collections,messageOf,today,type Collection} from '../lib/content.ts';
+ import Icon from '../components/Icon.svelte';
+ export let collection:Collection='posts';export let slug='';
+ interface Detail{slug:string;data:Record<string,unknown>;extraFields:Record<string,unknown>;body:string;version:{head:string;fileMtimeMs:number};postUrl:string|null;editorMode?:string;}
+ let post:Detail|null=null,loading=true,error='',message='',saving=false,uploading=false,showPreview=false,previewHtml='',previewId=0;
+ let title='',published=today(),updated='',description='',category='',tags='',series='',seriesOrder:number|undefined=undefined,draft=true,pinned=false,password='',passwordHint='',image='',author='',lang='',sourceLink='',licenseName='',licenseUrl='',comment=true,locationName='',status='',order:number|undefined=undefined,links='[]',body='',filename='',extraJson='{}';
+ let meta:{categories:{name:string}[]}|null=null,seriesList:{name:string}[]=[],images:{name:string;sizeKB:number;refPath:string}[]=[];
+ let snapshot='',ready=false,showDelete=false,deleteText='';
+ $: isNew=slug==='new';
+ $: state=JSON.stringify({title,published,updated,description,category,tags,series,seriesOrder,draft,pinned,password,passwordHint,image,author,lang,sourceLink,licenseName,licenseUrl,comment,locationName,status,order,links,body,filename,extraJson});
+ $: dirty=ready&&state!==snapshot;
+ $: setUnsavedChanges(dirty);
+ $: if(showPreview)void preview(body);
+ async function preview(text:string){const id=++previewId;const {marked}=await import('marked');const html=await marked.parse(text);const doc=new DOMParser().parseFromString(html,'text/html');
+ for(const img of doc.querySelectorAll('img')){const src=img.getAttribute('src')??'';const m=src.match(/^\.\/images\/([^/]+)\/([^/]+)$/);if(m&&m[1]===slug)img.src=`${window.location.origin}/api/v1/posts/${encodeURIComponent(slug)}/images/${encodeURIComponent(m[2])}`;}
+ if(id===previewId)previewHtml=doc.body.innerHTML;}
+ function data(){
+  const common={title,published};
+  if(collection==='dynamic')return {...common,pinned,location:locationName};
+  if(collection==='spec'){const extra=JSON.parse(extraJson);if(!extra||typeof extra!=='object'||Array.isArray(extra))throw new Error('页面属性必须为 JSON 对象');return extra;}
+  if(collection==='projects'){const link=JSON.parse(links);if(!Array.isArray(link))throw new Error('成员链接必须为 JSON 数组');return {...common,draft,description,image,tags:tags.split(/[,，]/).map(t=>t.trim()).filter(Boolean),lang,status,order:order??null,link};}
+  return {...common,updated:updated||null,description,category:category||null,tags:tags.split(/[,，]/).map(t=>t.trim()).filter(Boolean),series,seriesOrder:seriesOrder??null,draft,pinned,password,passwordHint,image,author,lang,sourceLink,licenseName,licenseUrl,comment};
+ }
+ async function load(){loading=true;error='';try{
+  if(!isNew){post=await api.get<Detail>(`/${collection}/${encodeURIComponent(slug)}`);const d=post.data;title=String(d.title??post.extraFields.title??'');published=String(d.published??today());updated=String(d.updated??'');description=String(d.description??'');category=String(d.category??'');tags=Array.isArray(d.tags)?d.tags.join(', '):'';series=String(d.series??'');seriesOrder=typeof d.seriesOrder==='number'?d.seriesOrder:undefined;draft=Boolean(d.draft);pinned=Boolean(d.pinned);password=String(d.password??'');passwordHint=String(d.passwordHint??'');image=String(d.image??'');author=String(d.author??'');lang=String(d.lang??'');sourceLink=String(d.sourceLink??'');licenseName=String(d.licenseName??'');licenseUrl=String(d.licenseUrl??'');comment=d.comment!==false;locationName=String(d.location??'');status=String(d.status??'');order=typeof d.order==='number'?d.order:undefined;links=JSON.stringify(d.link??[],null,2);body=post.body;extraJson=JSON.stringify({...post.extraFields,...d},null,2);await refreshImages();}
+  // Wait for Svelte's reactive snapshot before enabling change tracking.
+  await tick();snapshot=state;ready=true;
+ }catch(e){error=messageOf(e);}finally{loading=false;}}
+ async function refreshImages(){if(collection!=='posts'||!post)return;const r=await api.get<{images:typeof images}>(`/posts/${encodeURIComponent(post.slug)}/images`);images=r.images;}
+ async function save(publish=false){if(saving||uploading)return;error='';message='';saving=true;try{
+  if(collection!=='spec'&&!published)throw new Error('请填写发布日期');
+  if(collection!=='dynamic'&&collection!=='spec'&&!title.trim())throw new Error('请填写标题');
+  const payload=data();
+  if(isNew){let target=filename.trim();if(collection!=='dynamic'&&!target)throw new Error('请填写文件标识');if(target&&!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target))throw new Error('文件标识仅支持小写字母、数字和短横线');const r=await api.post<{slug:string}>(`/${collection}`,{...(target?{slug:target}:{}),data:payload,body,commit:true});snapshot=state;setUnsavedChanges(false);contentSaved();navigate(`/${collection}/${encodeURIComponent(r.slug)}`);return;}
+  if(!post)return;
+  const r=await api.put<{version:Detail['version'];committed:boolean}>(`/${collection}/${encodeURIComponent(slug)}`,{data:payload,body,expected:post.version,commit:true});post.version=r.version;snapshot=state;setUnsavedChanges(false);message=r.committed?'已保存到仓库，前往发布中心推送后生效。':'已保存，内容没有变化。';contentSaved();
+  if(publish){const result=await api.post<{pushedCount:number}>('/publish',{});message=`已推送 ${result.pushedCount} 个提交，等待博客自动构建。`;contentSaved();}
+ }catch(e){error=e instanceof ApiClientError&&e.status===409?'内容或仓库已有更新。请先复制当前正文备份，再重新加载后合并修改。':messageOf(e);}finally{saving=false;}}
+ async function uploadImage(ev:Event){const input=ev.target as HTMLInputElement;if(!input.files?.length||!post)return;uploading=true;error='';try{for(const file of Array.from(input.files)){if(file.size>5*1024*1024)throw new Error(`${file.name} 超过 5MB`);const form=new FormData();form.append('file',file);const r=await api.upload<{refPath:string}>(`/posts/${encodeURIComponent(slug)}/images`,form);body+=`\n![${file.name.replace(/[\[\]]/g,'')}](${r.refPath})\n`;}await refreshImages();message='图片已上传并插入正文，请保存以提交图片和文章。';contentSaved();}catch(e){error=messageOf(e);}finally{uploading=false;input.value='';}}
+ async function remove(){if(!post||deleteText!==slug||saving)return;saving=true;error='';try{await api.del(`/${collection}/${encodeURIComponent(slug)}`,{expected:post.version});setUnsavedChanges(false);contentSaved();navigate(`/${collection}`);}catch(e){error=messageOf(e);}finally{saving=false;}}
+ function download(){const blob=new Blob([body],{type:'text/markdown;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${slug==='new'?'draft':slug}.md`;a.click();URL.revokeObjectURL(url);}
+ function beforeUnload(e:BeforeUnloadEvent){if(dirty){e.preventDefault();e.returnValue='';}}
+ function shortcut(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();void save();}}
+ onMount(()=>{void load();if(collection==='posts')void Promise.all([api.get<typeof meta>('/meta'),api.get<{items:typeof seriesList}>('/series')]).then(([m,s])=>{meta=m;seriesList=s.items;}).catch(e=>error=messageOf(e));window.addEventListener('beforeunload',beforeUnload);window.addEventListener('keydown',shortcut);return()=>{window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('keydown',shortcut);setUnsavedChanges(false);};});
 </script>
-
-{#if post}
-	<div class="head">
-		<button class="ghost" on:click={() => navigate("/posts")}>← 返回列表</button>
-		<span class="slug">{slug}</span>
-		{#if post.postUrl}<span class="url">站点路径: {post.postUrl}</span>{/if}
-		<div class="actions">
-			<button class="ghost" on:click={togglePreview}>{showPreview ? "编辑" : "预览"}</button>
-			<button disabled={saving} on:click={() => save(false)}>保存（不推送）</button>
-			<button
-				class="primary"
-				disabled={saving}
-				on:click={() => save(true)}
-			>保存并发布</button>
-		</div>
-	</div>
-
-	{#if message}<div class="msg">{message}</div>{/if}
-	{#if error}<div class="err">{error}</div>{/if}
-
-	<div class="layout">
-		<div class="meta-form">
-			<label>标题<input bind:value={title} /></label>
-			<label>发布日期<input
-					type="date"
-					bind:value={published}
-				/></label>
-			<label>更新日期<input
-					type="date"
-					bind:value={updated}
-				/></label>
-			<label>分类
-				<input
-					list="cats"
-					bind:value={category}
-					placeholder="选择或输入新分类"
-				/>
-				<datalist id="cats">
-					{#if meta}{#each meta.categories as c (c.name)}<option value={c.name}></option>{/each}{/if}
-				</datalist>
-			</label>
-			<label>标签（逗号分隔）<input bind:value={tagsInput} /></label>
-			<label>系列
-				<input
-					list="series-list"
-					bind:value={series}
-					placeholder="选择现有系列或留空"
-				/>
-				<datalist id="series-list">
-					{#each seriesList as s (s.name)}<option value={s.name}></option>{/each}
-				</datalist>
-			</label>
-			<label>系列序号<input
-					type="number"
-					bind:value={seriesOrder}
-				/></label>
-			<label>访问密码（留空为公开）<input bind:value={password} /></label>
-			<label class="check"><input
-					type="checkbox"
-					bind:checked={draft}
-				/>草稿</label>
-			<label class="check"><input
-					type="checkbox"
-					bind:checked={pinned}
-				/>置顶</label>
-			<label>摘要<textarea
-					rows="3"
-					bind:value={description}
-				/></label>
-		</div>
-
-		<div class="editor-area">
-			{#if showPreview}
-				<div class="preview">{@html previewHtml}</div>
-			{:else}
-				<textarea
-					class="editor"
-					bind:value={body}
-					placeholder="Markdown 正文…"
-				></textarea>
-			{/if}
-			<div class="images">
-				<label class="upload">
-					＋ 上传图片
-					<input
-						type="file"
-						accept="image/*"
-						multiple
-						on:change={uploadImage}
-					/>
-				</label>
-				{#each images as img (img.name)}
-					<span class="img-tag" title="{img.name} {img.sizeKB}KB">{img.name}</span>
-				{/each}
-			</div>
-		</div>
-	</div>
-{:else}
-	<p>加载中…</p>
-{/if}
-
-<style>
-	.head {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		margin-bottom: 12px;
-	}
-	.slug {
-		font-family: monospace;
-		color: #64748b;
-		font-size: 13px;
-	}
-	.url {
-		color: #94a3b8;
-		font-size: 12px;
-	}
-	.actions {
-		margin-left: auto;
-		display: flex;
-		gap: 8px;
-	}
-	button {
-		padding: 8px 14px;
-		border-radius: 8px;
-		border: 1px solid #d0d5dd;
-		background: #fff;
-		cursor: pointer;
-		font-size: 14px;
-	}
-	button:disabled {
-		opacity: 0.6;
-	}
-	.primary {
-		background: #059669;
-		border-color: #059669;
-		color: #fff;
-	}
-	.ghost {
-		border-color: transparent;
-		color: #2563eb;
-	}
-	.msg {
-		background: #ecfdf5;
-		color: #065f46;
-		border: 1px solid #a7f3d0;
-		border-radius: 8px;
-		padding: 8px 12px;
-		margin-bottom: 12px;
-		font-size: 14px;
-	}
-	.err {
-		background: #fef2f2;
-		color: #b91c1c;
-		border: 1px solid #fecaca;
-		border-radius: 8px;
-		padding: 8px 12px;
-		margin-bottom: 12px;
-		font-size: 14px;
-	}
-	.layout {
-		display: grid;
-		grid-template-columns: 320px 1fr;
-		gap: 16px;
-		align-items: start;
-	}
-	.meta-form {
-		background: #fff;
-		border-radius: 10px;
-		padding: 16px;
-		box-shadow: 0 1px 4px rgb(0 0 0 / 6%);
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		font-size: 13px;
-		color: #475569;
-	}
-	label.check {
-		flex-direction: row;
-		align-items: center;
-	}
-	input,
-	textarea {
-		padding: 8px 10px;
-		border: 1px solid #d0d5dd;
-		border-radius: 6px;
-		font-size: 14px;
-	}
-	.editor-area {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.editor {
-		width: 100%;
-		min-height: 60vh;
-		font-family: monospace;
-		font-size: 14px;
-		line-height: 1.7;
-		padding: 16px;
-		border: 1px solid #d0d5dd;
-		border-radius: 10px;
-		background: #fff;
-	}
-	.preview {
-		background: #fff;
-		border: 1px solid #d0d5dd;
-		border-radius: 10px;
-		padding: 24px;
-		min-height: 60vh;
-		line-height: 1.8;
-	}
-	.preview :global(img) {
-		max-width: 100%;
-	}
-	.preview :global(pre) {
-		background: #f4f4f5;
-		padding: 12px;
-		border-radius: 8px;
-		overflow-x: auto;
-	}
-	.images {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		flex-wrap: wrap;
-	}
-	.upload {
-		display: inline-flex;
-		padding: 6px 12px;
-		border: 1px dashed #94a3b8;
-		border-radius: 8px;
-		cursor: pointer;
-		color: #475569;
-		font-size: 13px;
-	}
-	.upload input {
-		display: none;
-	}
-	.img-tag {
-		background: #f1f5f9;
-		padding: 4px 8px;
-		border-radius: 6px;
-		font-size: 12px;
-		font-family: monospace;
-	}
+<div class="page-heading editor-heading"><div><div class="eyebrow">CONTENT / {collection.toUpperCase()}</div><h1>{isNew?'新建':'编辑'}{collections[collection].singular}</h1><a class="muted" href={`#/${collection}`}>← 返回{collections[collection].label}</a></div><div class="action-row"><span class="save-state">{dirty?'● 有未保存修改':'✓ 内容已保存'}</span><button on:click={download}>导出正文</button><button class="primary" disabled={saving||uploading||loading} on:click={()=>save()}>{saving?'保存中…':'保存内容'}</button>{#if !isNew}<button disabled={saving||uploading||loading} on:click={()=>save(true)}>保存并推送</button>{/if}</div></div>
+{#if error}<div class="err" role="alert">{error}{#if !post&&!isNew}<button on:click={load}>重新加载</button>{/if}</div>{/if}{#if message}<div class="msg" role="status">{message}</div>{/if}
+{#if loading}<div class="empty">正在载入编辑器…</div>{:else if post||isNew}
+<div class="editor-layout"><section class="panel content-editor"><div class="editor-top"><span>{post?.editorMode==='plaintext'?'MDX 源码':'Markdown 正文'}</span><div class="view-tabs"><button class:chosen={!showPreview} on:click={()=>showPreview=false}>编辑</button><button class:chosen={showPreview} on:click={()=>showPreview=true}>预览</button></div></div>
+{#if post?.editorMode==='plaintext'}<p class="hint mdx-note">MDX 预览仅展示 Markdown；组件效果以博客构建为准。</p>{/if}
+{#if showPreview}<iframe class="preview" title="Markdown 预览（隔离环境）" sandbox="" srcdoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: http://127.0.0.1:* data:; style-src 'unsafe-inline'"><style>body{font:14px/1.9 system-ui;color:#334155;padding:20px;overflow-wrap:anywhere}img{max-width:100%}pre{background:#f4f6fb;padding:16px;overflow:auto;border-radius:8px}code{font-size:12px}blockquote{border-left:3px solid #bdc6ef;padding-left:15px;color:#7b88a2}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}a{color:#5366df}</style></head><body>${previewHtml}</body></html>`}></iframe>
+{:else}<textarea class="markdown-editor" aria-label="Markdown 正文" bind:value={body} placeholder="在这里记录你的探索…" spellcheck="false"></textarea>{/if}
+<div class="editor-footer"><span>{body.length.toLocaleString()} 字符 · {body.split('\n').length} 行</span><span>⌘ / Ctrl + S 保存</span></div>
+{#if collection==='posts'&&post}<div class="image-tools"><label class="button upload">{uploading?'正在上传…':'＋ 上传图片'}<input type="file" accept=".png,.jpg,.jpeg,.webp,.avif,.gif" multiple disabled={uploading||saving} on:change={uploadImage}/></label><small>PNG / JPG / WebP / AVIF / GIF，最大 5MB</small>{#each images as img}<button class="image-ref" title={`${img.sizeKB}KB · 点击插入正文`} on:click={()=>body+=`\n![](${img.refPath})\n`}>{img.name}</button>{/each}</div>{/if}</section>
+<aside class="settings">
+<section class="panel"><div class="panel-head"><h2>内容属性</h2><span class="badge neutral">{isNew?'NEW':slug}</span></div><div class="panel-body fields">
+{#if isNew}<label class="form-field">文件标识{collection==='dynamic'?'（留空自动生成）':''}<input bind:value={filename} placeholder="例如 cyber-club-news"/></label>{/if}
+{#if collection!=='spec'}<label class="form-field">{collection==='dynamic'?'动态标题（可选）':'标题'}<input bind:value={title}/></label><label class="form-field">发布日期<input type="date" bind:value={published}/></label>{/if}
+{#if collection==='posts'}<label class="form-field">更新日期<input type="date" bind:value={updated}/></label><label class="form-field">分类<input list="categories" bind:value={category}/><datalist id="categories">{#each meta?.categories??[] as c}<option value={c.name}></option>{/each}</datalist></label>{/if}
+{#if collection==='posts'||collection==='projects'}<label class="form-field">摘要<textarea rows="3" bind:value={description}></textarea></label><label class="form-field">标签（逗号分隔）<input bind:value={tags}/></label><label class="form-field">封面图路径<input bind:value={image} placeholder="图片路径或 HTTPS 地址"/></label><label class="check-field"><input type="checkbox" bind:checked={draft}/>草稿（博客前台不显示）</label>{/if}
+{#if collection==='dynamic'}<label class="form-field">地点<input bind:value={locationName}/></label>{/if}
+{#if collection==='posts'||collection==='dynamic'}<label class="check-field"><input type="checkbox" bind:checked={pinned}/>置顶内容</label>{/if}
+{#if collection==='spec'}<label class="form-field">页面属性（JSON 对象）<textarea rows="12" bind:value={extraJson} spellcheck="false"></textarea></label><p class="hint">正文用于关于我们等页面。属性会保留原有字段。</p>{/if}
+{#if collection==='posts'}<label class="form-field">系列<input list="series" bind:value={series}/><datalist id="series">{#each seriesList as s}<option value={s.name}></option>{/each}</datalist></label><label class="form-field">章节序号<input type="number" step="1" min="1" bind:value={seriesOrder}/></label>{/if}
+{#if collection==='projects'}<label class="form-field">成员状态<input bind:value={status} placeholder="例如 在校 / 已毕业"/></label><label class="form-field">显示顺序<input type="number" step="1" bind:value={order}/></label><label class="form-field">社交链接（JSON 数组）<textarea rows="7" bind:value={links} placeholder={'[{"label":"GitHub","icon":"fa6-brands:github","value":"https://github.com/…"}]'}></textarea></label>{/if}
+</div></section>
+{#if collection==='posts'}<section class="panel"><details class="advanced"><summary>访问与版权设置</summary><div class="fields"><label class="form-field">作者<input bind:value={author}/></label><label class="form-field">语言<input bind:value={lang} placeholder="zh-CN"/></label><label class="form-field">原文链接<input bind:value={sourceLink}/></label><label class="form-field">许可证名称<input bind:value={licenseName}/></label><label class="form-field">许可证链接<input bind:value={licenseUrl}/></label><label class="check-field"><input type="checkbox" bind:checked={comment}/>允许评论</label><label class="form-field">访问密码（清空即公开）<input type="password" autocomplete="off" bind:value={password}/></label><label class="form-field">密码提示<input bind:value={passwordHint}/></label></div></details></section>{/if}
+{#if post}<section class="panel"><div class="panel-body fields"><p class="hint">文件标识：{slug}<br/>保存仅提交到仓库，推送后才触发博客构建。</p>{#if post.postUrl}<a class="button" href={`https://www.cyberpioneer.club${post.postUrl}`} target="_blank" rel="noreferrer">查看博客页面 <Icon name="arrow" size={14}/></a>{/if}<button class="danger" on:click={()=>showDelete=!showDelete}>删除此{collections[collection].singular}</button>{#if showDelete}<div class="delete-confirm"><p>将删除内容文件并创建删除提交。可通过 Git 历史恢复。输入 <strong>{slug}</strong> 确认。</p><input aria-label="输入文件标识确认删除" bind:value={deleteText}/><button class="danger" disabled={deleteText!==slug||saving} on:click={remove}>确认删除</button></div>{/if}</div></section>{/if}
+</aside></div>{/if}
+<style>.editor-heading{align-items:flex-start}.editor-heading h1{font-size:24px}.save-state{font-size:11px;color:#9aa5bc}.editor-layout{display:grid;grid-template-columns:minmax(0,1fr) 305px;gap:24px;align-items:start}.content-editor{position:sticky;top:20px}.editor-top{display:flex;justify-content:space-between;align-items:center;padding:13px 20px;border-bottom:1px solid #e8ecf3;color:#8290aa;font-size:12px}.view-tabs{display:flex;background:#f5f7fc;border-radius:6px;padding:3px}.view-tabs button{border:0;background:none;font-size:11px;padding:6px 13px}.view-tabs button.chosen{background:white;color:#5366df;box-shadow:0 1px 4px #13234a10}.markdown-editor{display:block;width:100%;min-height:65vh;border:0;border-radius:0;resize:vertical;padding:24px;line-height:1.9;font-size:13px;font-family:'SFMono-Regular',Consolas,'PingFang SC',monospace;tab-size:2;color:#52617b}.markdown-editor:focus{outline:0}.editor-footer{display:flex;justify-content:space-between;padding:13px 20px;border-top:1px solid #eff2f7;font-size:10px;color:#a1adc2}.preview{border:0;width:100%;min-height:65vh;display:block;background:white}.settings{display:flex;flex-direction:column;gap:18px}.settings .panel-head{padding:18px}.settings .panel-head .badge{max-width:135px;overflow:hidden;text-overflow:ellipsis;display:block}.settings .panel-body{padding:18px}.fields{display:flex;flex-direction:column;gap:17px}.advanced{padding:20px}.advanced summary{font-size:12px;color:#75839d;cursor:pointer}.advanced .fields{margin-top:22px}.image-tools{display:flex;gap:9px;align-items:center;flex-wrap:wrap;border-top:1px solid #eff2f7;padding:15px}.image-tools small{font-size:10px;color:#a1adc2}.upload{font-size:11px;cursor:pointer;padding:8px 12px}.upload input{display:none}.image-ref{font-size:10px;padding:5px 8px}.mdx-note{padding:12px 20px;margin:0}.delete-confirm p{font-size:11px;line-height:1.8;color:#9b7781}.delete-confirm input{width:100%;margin-bottom:10px}.delete-confirm button{width:100%}@media(max-width:1200px){.editor-layout{grid-template-columns:minmax(0,1fr) 270px;gap:16px}.editor-heading{flex-wrap:wrap}}@media(max-width:950px){.editor-layout{grid-template-columns:1fr}.content-editor{position:static}.markdown-editor,.preview{min-height:50vh}.settings{display:grid;grid-template-columns:1fr}.editor-heading .action-row{gap:7px}.editor-heading button{font-size:11px;padding:8px 11px}}
 </style>

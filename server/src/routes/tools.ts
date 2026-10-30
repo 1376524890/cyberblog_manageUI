@@ -48,12 +48,25 @@ export const toolRoutes = new Hono()
 				images.push({
 					name,
 					sizeKB: Math.round(st.size / 1024),
-					refPath: `./images/${name}`,
+					refPath: `./images/${slug}/${name}`,
 				});
 			}
 		}
 		return c.json({ slug, images });
 	})
+
+ .get("/posts/:slug/images/:filename", async c => {
+  const slug=c.req.param("slug");
+  await getOne("posts",slug);
+  const filename=c.req.param("filename");
+  if(filename!==path.basename(filename) || filename.startsWith(".")) throw new ApiError(400,"BAD_REQUEST","非法图片名");
+  const abs=path.join(imagesDir(slug),filename);
+  if(!fs.existsSync(abs)||!fs.statSync(abs).isFile())throw new ApiError(404,"NOT_FOUND","图片不存在");
+  const types:Record<string,string>={png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",avif:"image/avif",gif:"image/gif"};
+  const type=types[path.extname(filename).slice(1).toLowerCase()];
+  if(!type)throw new ApiError(415,"UNSUPPORTED_MEDIA_TYPE","不支持的图片格式");
+  return c.body(fs.readFileSync(abs) as any,200,{"Content-Type":type,"Cache-Control":"private, no-store"});
+ })
 
 	// POST /posts/:slug/images
 	.post("/posts/:slug/images", async (c) => {
@@ -74,7 +87,7 @@ export const toolRoutes = new Hono()
 		}
 		const dir = imagesDir(slug);
 		await fs.promises.mkdir(dir, { recursive: true });
-		const safeName = file.name.replace(/[^\w.-]/g, "_");
+		const safeName = `${Date.now()}-${crypto.randomUUID().slice(0,8)}-${file.name.replace(/[^\w.-]/g, "_")}`;
 		const abs = path.join(dir, safeName);
 		const buf = Buffer.from(await file.arrayBuffer());
 		// sharp 压缩：长边 ≤1920px（gif 保持原样避免丢动画）
@@ -87,7 +100,7 @@ export const toolRoutes = new Hono()
 						.toBuffer();
 		await fs.promises.writeFile(abs, processed);
 		const sizeKB = Math.round(processed.byteLength / 1024);
-		return c.json({ name: safeName, refPath: `./images/${safeName}`, sizeKB }, 201);
+		return c.json({ name: safeName, refPath: `./images/${slug}/${safeName}`, sizeKB }, 201);
 	})
 
 	// DELETE /posts/:slug/images/:filename

@@ -7,7 +7,8 @@ import { z } from "zod";
 
 const dateString = z
 	.string()
-	.regex(/^\d{4}-\d{2}-\d{2}$/, "日期必须为 YYYY-MM-DD 格式");
+	.regex(/^\d{4}-\d{2}-\d{2}$/, "日期必须为 YYYY-MM-DD 格式")
+ .refine(v => !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0,10) === v, "日期不存在");
 
 export const postSchema = z.object({
 	title: z.string().min(1),

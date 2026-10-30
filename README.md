@@ -43,3 +43,31 @@ pnpm build && pnpm acceptance
 ## schema 同步约定
 
 `server/src/core/schemas.ts` 是博客仓库 `src/content.config.ts` zod 定义的**手工镜像**（两仓库物理隔离，无法直接 import）。博客仓库 schema 变更时须同步此处；`pnpm --dir server test:schema-diff` 可输出当前镜像的字段清单便于人工比对。
+
+## 内容工作台（2026-10-30）
+
+- 工作台：文章、草稿、系列及待推送提交概览。
+- 文章：标题/摘要/文件标识搜索，分类、系列、标签与草稿筛选，日期/标题排序。
+- 动态、成员与独立页面：新增、编辑、删除；成员支持社交链接数组，独立页面支持属性 JSON。
+- 编辑：Markdown 隔离预览、正文导出、快捷键保存、未保存提醒；文章支持封面、访问密码、版权与评论设置。
+- 系列：查看章节、继续写下一篇，自动建议章节序号和文件标识。
+- 图片：5MB 限制、唯一文件名、受认证保护的预览，随文章保存一起提交。
+- 发布：显示真实 Git 状态与待推送记录；工作区不干净时阻止发布。推送成功不等于托管平台构建完成。
+
+### 验证
+
+```bash
+pnpm typecheck
+pnpm build
+pnpm fixtures
+pnpm acceptance
+CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_modules/.bin/tsx scripts/regression.mjs
+```
+
+回归脚本仅接受 `test-fixtures/` 下的仓库，覆盖密码与可选字段清空、多行摘要、图片上传/预览/提交/发布、动态/成员/页面写入、MDX 重名与毫秒级并发修改等问题。验收和回归请使用独立测试端口及测试仓库。
+
+### 服务器开发与部署
+
+当前服务器开发目录：`/root/cyberblog-cms-work`；生产应用：`/root/cyberblog-cms-prod/app`；服务：`cyber-cms.service`。内容仓库由生产环境配置指定，应用部署不包含内容仓库及凭据文件。
+
+构建及依赖均在服务器操作。本地仅同步源码。发布前保存应用源码、构建产物及原版本号到 `/root/cyberblog-cms-backups/`。回退时停止服务，用对应备份恢复应用源码与 `web/dist` 后启动服务；保留现有依赖、环境配置及博客内容仓库。

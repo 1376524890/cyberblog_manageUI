@@ -1,0 +1,10 @@
+<script lang="ts">
+ import {onMount} from 'svelte';import {api} from '../lib/api.ts';import {messageOf} from '../lib/content.ts';import Icon from '../components/Icon.svelte';
+ let items:{name:string;count:number;orders:number[];slugs:string[]}[]=[],error='',loading=true;
+ onMount(()=>{void api.get<{items:typeof items}>('/series').then(r=>items=r.items).catch(e=>error=messageOf(e)).finally(()=>loading=false);});
+</script>
+<div class="page-heading"><div><div class="eyebrow">CONTENT / SERIES</div><h1>系列管理</h1><p class="muted">将零散知识串成体系，让学习有路可循。</p></div><a class="button primary" href="#/new"><Icon name="plus" size={16}/>新建系列文章</a></div>
+{#if error}<div class="err" role="alert">{error}</div>{/if}
+{#if loading}<div class="empty">正在整理系列…</div>{:else if !items.length}<div class="panel empty"><h3>从第一篇系列文章开始</h3><p class="muted">新建文章时选择「新建系列」，填写名称即可。</p></div>{:else}<div class="series-grid">{#each items as s,i}<section class="panel"><div class="series-head"><span class="stat-icon"><Icon name="series" size={22}/></span><span class="number">{String(i+1).padStart(2,'0')}</span></div><h2>{s.name}</h2><p class="muted">{s.count} 篇文章 · {s.orders.length?'序号 '+s.orders.join(' / '):'未设置序号'}</p><details><summary>查看全部章节</summary><div class="chapters">{#each s.slugs as slug}<a href={`#/posts/${encodeURIComponent(slug)}`}>{slug} ↗</a>{/each}</div></details><a class="button" href={`#/new?series=${encodeURIComponent(s.name)}`}>继续写下一篇 →</a></section>{/each}</div>{/if}
+<div class="hint" style="margin-top:22px">系列由文章的「系列名称」自动归组，可在文章编辑页修改名称和章节序号。</div>
+<style>.series-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:22px}.series-grid section{padding:25px}.series-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px}.number{font-size:26px;color:#e4e8f3;font-weight:600}.series-grid h2{font-size:17px}.series-grid p{font-size:11px}.series-grid .button{margin-top:22px;font-size:12px}summary{font-size:12px;color:#7f8bab;cursor:pointer;margin-top:20px}.chapters{display:flex;flex-direction:column;gap:10px;margin-top:16px}.chapters a{font-size:11px;overflow-wrap:anywhere}</style>

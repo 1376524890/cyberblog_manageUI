@@ -12,8 +12,8 @@ export interface GitStatusInfo {
 	pendingCommits: { sha: string; message: string; time: string }[];
 	lastPushedSha: string | null;
 	remoteAhead: boolean;
-	healthy: true;
-	lockedReason: null;
+	healthy: boolean;
+	lockedReason: string | null;
 }
 
 function git() {
@@ -31,6 +31,7 @@ export async function status(): Promise<GitStatusInfo> {
 	let pending: { sha: string; message: string; time: string }[] = [];
 	let lastPushed: string | null = null;
 	let remoteAhead = false;
+	let trackingHealthy = true;
 	try {
 		const tracking = await g.raw(["rev-list", "--left-right", "--count", `${config.gitRemote}/${config.gitBranch}...HEAD`]);
 		const [behind, ahead] = tracking.trim().split(/\s+/).map(Number);
@@ -42,7 +43,7 @@ export async function status(): Promise<GitStatusInfo> {
 		const pushed = await g.raw(["rev-parse", `${config.gitRemote}/${config.gitBranch}`]).catch(() => null);
 		lastPushed = pushed?.trim() || null;
 	} catch {
-		// 无远程或未 fetch 时静默（验收环境有 bare origin）
+		trackingHealthy = false;
 	}
 	return {
 		head: headSha,
@@ -52,8 +53,8 @@ export async function status(): Promise<GitStatusInfo> {
 		pendingCommits: pending,
 		lastPushedSha: lastPushed,
 		remoteAhead,
-		healthy: true,
-		lockedReason: null,
+		healthy: !!head && !!branch && !!st && trackingHealthy,
+		lockedReason: !trackingHealthy ? "无法读取远端跟踪分支，请检查仓库配置" : (!head || !st ? "仓库读取失败" : null),
 	};
 }
 
@@ -72,12 +73,12 @@ export async function commitPaths(
 	const st = await g.status();
 	const relPaths = st.files.map((f) => f.path);
 	const changed = paths.filter((p) =>
-		relPaths.some((rp) => rp === p || rp.endsWith(`/${p}`) || p.endsWith(`/${rp}`)),
+		relPaths.some((rp) => rp === p || rp.startsWith(`${p}/`) || p.startsWith(`${rp.replace(/\/$/, "")}/`)),
 	);
 	let head: string | null = null;
 	if (changed.length > 0) {
-		await g.add(paths);
-		const cm = await g.commit(message);
+		await g.add(changed);
+		const cm = await g.commit(message, changed);
 		head = cm.commit || null;
 	}
 	const pending = await hasPendingPush();
@@ -98,7 +99,9 @@ async function hasPendingPush(): Promise<boolean> {
 export async function publish(): Promise<{ pushedSha: string; pushedCount: number }> {
 	const g = git();
 	try {
-		await g.fetch(config.gitRemote).catch(() => {});
+		const st = await g.status();
+		if (!st.isClean()) throw new ApiError(409,"GIT_REPO_DIRTY","工作区存在未提交修改，请先保存内容及图片再发布");
+		await g.fetch(config.gitRemote);
 		const tracking = await g.raw([
 			"rev-list",
 			"--left-right",

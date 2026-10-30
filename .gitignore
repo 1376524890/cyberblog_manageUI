@@ -16,3 +16,7 @@ test-fixtures/
 .DS_Store
 ._*
 .test-fixtures-old-*/
+
+# 服务器隔离预览与运行日志
+ui-fixtures/
+ui-preview.log

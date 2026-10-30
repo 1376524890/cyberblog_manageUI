@@ -31,6 +31,16 @@ const v1 = new Hono();
 v1.route("/auth", authRoutes);
 // 认证中间件：之后注册的全部路由受保护
 v1.use("*", authMiddleware());
+// Serialize content mutations and Git operations in this single-process service.
+let mutationTail = Promise.resolve();
+v1.use("*", async (c,next) => {
+ if (!["POST","PUT","DELETE"].includes(c.req.method)) return next();
+ const previous=mutationTail;
+ let release!:()=>void;
+ mutationTail=new Promise<void>(resolve=>{release=resolve;});
+ await previous;
+ try { await next(); } finally { release(); }
+});
 // /me 必须在 authMiddleware 之后注册（受保护）
 v1.get("/auth/me", (c) => c.json({ role: "admin", expiresAt: null }));
 v1.route("/posts", collectionRoutes("posts"));
@@ -50,6 +60,7 @@ v1.post("/publish", async (c) => {
 });
 
 app.route("/api/v1", v1);
+app.all("/api/*", c => c.json({error:{code:"NOT_FOUND",message:"接口不存在"}},404));
 
 // 前端静态托管（生产）
 if (fs.existsSync(config.webDist)) {
