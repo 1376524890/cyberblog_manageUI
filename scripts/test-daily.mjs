@@ -1,3 +1,11 @@
+import {
+  canonicalRepo,
+  scanFeaturedPosts,
+  featuredHistory,
+  rememberFeatured,
+  selectUnfeatured,
+  duplicateFeature,
+} from "../server/src/ai/dedup.ts";
 import { assertCoreDiagram } from "../server/src/ai/research.ts";
 import sharp from "../server/node_modules/sharp/lib/index.js";
 import { renderArchitecturePNG } from "../server/src/ai/architecture.ts";
@@ -27,14 +35,14 @@ function check(name, ok) {
   checks++;
 }
 const html = Array.from(
-  { length: 7 },
+  { length: 12 },
   (_, i) =>
     `<article class="Box-row"><h2><a href="/team/repo${i}"> repo </a></h2><span>1,234 stars today</span></article>`,
 ).join("");
 const ranking = parseTrending(html);
 check(
-  "Daily ranking preserves first five and parses growth",
-  ranking.length === 5 &&
+  "Daily ranking retains candidate pool and parses growth",
+  ranking.length === 12 &&
     ranking[0].name === "team/repo0" &&
     ranking[4].todayStars === 1234,
 );
@@ -186,6 +194,7 @@ const dir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-test-"),
 );
 const deps = {
+  history: async () => [],
   trending: async () => ranking,
   evidence: async (r) => makeEvidence(r),
   generate: async () => {
@@ -253,6 +262,15 @@ check(
 const post = await fetch(base + "/posts/github-daily-2026-10-30", {
   headers,
 }).then((r) => r.json());
+check(
+  "Article records canonical featured identities",
+  post.extraFields.githubRepos.length === 5,
+);
+const scanned = await scanFeaturedPosts();
+check(
+  "Existing draft scan finds featured projects",
+  scanned.filter((h) => h.slug === post.slug).length === 5,
+);
 check(
   "Draft is private until review and has no password",
   post.data.draft === true && !post.data.password,
@@ -351,6 +369,52 @@ check(
   "Scheduled draft passed automatic quality gates",
   (await restored.status()).runs[0].quality?.passed === true,
 );
+check(
+  "Next day excludes every previous project",
+  scheduled.extraFields.githubRepos.every(
+    (r) =>
+      !post.extraFields.githubRepos.some(
+        (p) => canonicalRepo(p.name) === canonicalRepo(r.name),
+      ),
+  ),
+);
+check(
+  "Original daily ranking retained after filtering",
+  (await restored.status()).runs[0].ranking[0].trendingRank === 6,
+);
+check(
+  "Canonical names ignore URL case and git suffix",
+  canonicalRepo("https://github.com/Team/Repo.git/blob/main/a.ts") ===
+    "team/repo",
+);
+check(
+  "Rejects non GitHub URLs and special pages",
+  canonicalRepo("https://evil.test/a/b") === null &&
+    canonicalRepo("https://github.com/topics/test") === null,
+);
+const durable = await featuredHistory(dir);
+check("Feature ledger survives service restart", durable.length === 10);
+assert.throws(() => selectUnfeatured(ranking, durable), /只有2个/);
+checks++;
+check(
+  "Rename identified by stable repository ID",
+  !!duplicateFeature({ ...ev, name: "team/renamed", repositoryId: 42 }, [
+    { repo: "old/name", id: 42, slug: "x", date: "", recordedAt: "" },
+  ]),
+);
+const blocked = new DailyService(dir, deps);
+blocked.setWriter(async () => {
+  throw Error("Should not write");
+});
+now = new Date("2026-11-01T00:00:00Z");
+await blocked.configure(true);
+await blocked.tick();
+await blocked.wait();
+check(
+  "Insufficient fresh candidates fail without recycling or partial draft",
+  (await blocked.status()).runs[0].state === "failed" &&
+    (await featuredHistory(dir)).length === 10,
+);
 const failureDir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-failed-"),
 );
@@ -369,6 +433,10 @@ await failing.configure(true);
 await failing.tick();
 await failing.wait();
 check(
+  "Failed generation does not mark projects as featured",
+  (await featuredHistory(failureDir)).length === 0,
+);
+check(
   "Failure recorded without writing partial blog",
   (await failing.status()).runs[0].state === "failed" && saved === 2,
 );
@@ -386,5 +454,42 @@ await failing.configure(false);
 now = new Date(now.getTime() + 86400000);
 await failing.tick();
 check("Paused schedule creates nothing", saved === 3);
+// Same-date retry after a newly featured repository changes the selected ranks.
+const cacheDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-cache-"),
+);
+let attempt = 0,
+  addedHistory = [],
+  seenNames = [];
+const cacheService = new DailyService(cacheDir, {
+  ...deps,
+  history: async () => addedHistory,
+  generate: async (source) => {
+    seenNames.push(source.name);
+    if (attempt === 0 && source.rank === 2)
+      throw new ApiError(502, "AI_CONNECTION", "temporary");
+    return { model: "mock", analysis: makeAnalysis() };
+  },
+});
+cacheService.setWriter(async (d) => {
+  check(
+    "Changed ranking uses matching source identities",
+    d.githubRepos[0].name === "team/repo1" &&
+      !d.githubRepos.some((r) => r.name === "team/repo0"),
+  );
+});
+await cacheService.start();
+await cacheService.wait();
+attempt++;
+addedHistory = [
+  { repo: "team/repo0", slug: "other", date: "", recordedAt: "" },
+];
+await cacheService.start();
+await cacheService.wait();
+check(
+  "Retry invalidates stale rank-based source and analysis caches",
+  (await cacheService.status()).runs[0].state === "done" &&
+    seenNames.filter((n) => n === "team/repo1").length === 2,
+);
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);

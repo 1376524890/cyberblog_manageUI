@@ -32,6 +32,17 @@ const versionSchema = z.object({
 });
 
 const writeBodySchema = z.object({
+  githubRepos: z
+    .array(
+      z
+        .object({
+          name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+          id: z.number().int().positive().optional(),
+        })
+        .strict(),
+    )
+    .max(5)
+    .optional(),
   assets: z
     .array(
       z
@@ -253,6 +264,8 @@ export function collectionRoutes(collection: CollectionName): Hono {
       }
       let data = { ...req.data };
       const extra: Record<string, unknown> = {};
+      if (collection === "posts" && req.githubRepos)
+        extra.githubRepos = req.githubRepos;
       if (collection === "dynamic" && "title" in data) {
         extra.title = data.title;
         delete data.title;

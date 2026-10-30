@@ -3,10 +3,12 @@ export const TRENDING = "https://github.com/trending?since=daily";
 export interface RankedRepo {
   name: string;
   rank: number;
+  trendingRank?: number;
   todayStars: number | null;
 }
 export interface Evidence extends RankedRepo {
   sha: string;
+  repositoryId?: number;
   evidenceVersion?: number;
   treeComplete?: boolean;
   corePlan?: {
@@ -55,9 +57,9 @@ export function parseTrending(html: string): RankedRepo[] {
       rank: out.length + 1,
       todayStars: count ? Number(count.replaceAll(",", "")) : null,
     });
-    if (out.length === 5) break;
+    if (out.length === 30) break;
   }
-  if (out.length !== 5)
+  if (out.length < 5)
     throw new ApiError(
       502,
       "GITHUB_RANKING",
@@ -192,6 +194,7 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     sha,
     evidenceVersion: 2,
     codeSampled: files.some((f) => sources.some((s: any) => s.path === f.path)),
+    repositoryId: meta.id,
     description: String(meta.description ?? "").slice(0, 1000),
     stars: meta.stargazers_count,
     language: meta.language ?? "未标注",

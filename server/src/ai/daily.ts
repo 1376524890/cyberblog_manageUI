@@ -1,4 +1,12 @@
 import {
+  canonicalRepo,
+  scanFeaturedPosts,
+  featuredHistory,
+  rememberFeatured,
+  selectUnfeatured,
+  duplicateFeature,
+} from "./dedup.ts";
+import {
   planCoreResearch,
   assertCoreDiagram,
   reviewCoreResult,
@@ -23,7 +31,6 @@ import {
   trending,
   evidence,
   TRENDING,
-  enrichEvidence,
   readPublicRepoFile,
   type Evidence,
 } from "./github.ts";
@@ -244,6 +251,7 @@ export class DailyService {
   constructor(
     private directory = root,
     private deps = {
+      history: scanFeaturedPosts,
       trending,
       evidence,
       generate: authorReviewedProject,
@@ -341,19 +349,31 @@ export class DailyService {
     try {
       const cacheDir = path.join(this.directory, run.date);
       const rankFile = path.join(cacheDir, "ranking.json");
+      const current = await (this.deps.history ?? scanFeaturedPosts)();
+      let history = await rememberFeatured(this.directory, current);
+      const slug = `github-daily-${run.date}`;
+      if (current.some((h) => h.slug === slug)) {
+        run.state = "done";
+        run.slug = slug;
+        run.progress = "当日草稿已存在，保留现有内容";
+        return;
+      }
       let snapshot = await readJSON<{
         fetchedAt: string;
+        candidates?: NonNullable<Run["ranking"]>;
         ranking: Run["ranking"];
       }>(rankFile);
-      if (!snapshot) {
-        snapshot = {
-          fetchedAt: this.deps.now().toISOString(),
-          ranking: await this.deps.trending(),
-        };
-        await writeJSON(rankFile, snapshot);
-      }
-      run.ranking = snapshot.ranking;
-      if (run.ranking?.length !== 5) throw new Error("Invalid cached ranking");
+      // Failed runs refresh the daily list; source caches remain keyed by repository identity.
+      const candidates =
+        !snapshot || run.attempts > 1
+          ? await this.deps.trending()
+          : (snapshot.candidates ?? snapshot.ranking ?? []);
+      run.ranking = selectUnfeatured(candidates, history);
+      await writeJSON(rankFile, {
+        fetchedAt: this.deps.now().toISOString(),
+        candidates,
+        ranking: run.ranking,
+      });
       const projects: ProjectArticle[] = [];
       const assets: ImageAsset[] = [];
       const introductions: {
@@ -364,26 +384,44 @@ export class DailyService {
       for (const repo of run.ranking) {
         run.progress = `分析 ${repo.rank}/5：${repo.name}`;
         await this.persist();
-        const evPath = path.join(cacheDir, `${repo.rank}-source-v4.json`);
+        const evPath = path.join(cacheDir, `${repo.rank}-source-v5.json`);
         let ev = await readJSON<Evidence>(evPath);
-        if (!ev) {
-          const legacy = await readJSON<Evidence>(
-            path.join(cacheDir, `${repo.rank}-source-v2.json`),
+        if (ev && canonicalRepo(ev.name) !== canonicalRepo(repo.name))
+          ev = null;
+        if (!ev) ev = await this.deps.evidence(repo);
+        ev = { ...ev, ...repo };
+        const duplicate = duplicateFeature(ev, history);
+        if (duplicate) {
+          await rememberFeatured(this.directory, [
+            {
+              ...duplicate,
+              repo: ev.name,
+              id: ev.repositoryId ?? duplicate.id,
+            },
+          ]);
+          throw new ApiError(
+            409,
+            "DAILY_RENAMED_PROJECT",
+            "仓库更名后与历史项目重复，已记住别名，下次重试会跳过",
           );
-          ev = legacy
-            ? await enrichEvidence(legacy)
-            : await this.deps.evidence(repo);
         }
         await writeJSON(evPath, ev);
         const analysisPath = path.join(
           cacheDir,
-          `${repo.rank}-analysis-reviewed-v4.json`,
+          `${repo.rank}-analysis-reviewed-v5.json`,
         );
-        const cached = await readJSON<{ analysis: Analysis; model: string }>(
-          analysisPath,
-        );
+        const cached = await readJSON<{
+          analysis: Analysis;
+          model: string;
+          sourceRepo: string;
+          sourceSha: string;
+        }>(analysisPath);
         const result =
-          cached ??
+          (cached &&
+          canonicalRepo(cached.sourceRepo) === canonicalRepo(ev.name) &&
+          cached.sourceSha === ev.sha
+            ? cached
+            : null) ??
           (await this.deps.generate(ev, (text) => {
             run.progress = `${repo.rank}/5 ${repo.name} · ${text}`;
             void this.persist();
@@ -391,7 +429,11 @@ export class DailyService {
         const a = validateAnalysis(result.analysis, ev);
         await writeJSON(evPath, ev);
         run.model = result.model;
-        await writeJSON(analysisPath, result);
+        await writeJSON(analysisPath, {
+          ...result,
+          sourceRepo: ev.name,
+          sourceSha: ev.sha,
+        });
         const png = await renderArchitecturePNG(repo.name, a);
         const filename = `${String(repo.rank).padStart(2, "0")}-${repo.name
           .split("/")[1]
@@ -409,16 +451,40 @@ export class DailyService {
       }
       run.progress = "撰写开篇与收尾，保存图文草稿";
       await this.persist();
-      const editionPath = path.join(cacheDir, "edition-blog-v3.json");
+      const editionKey = run.ranking
+        .map((r) => canonicalRepo(r.name))
+        .join("|");
+      const editionPath = path.join(cacheDir, "edition-blog-v5.json");
       const edition =
-        (await readJSON<Edition>(editionPath)) ??
-        (await this.deps.overview(run.date, introductions));
-      await writeJSON(editionPath, edition);
+        (await readJSON<{ key: string; edition: Edition }>(editionPath).then(
+          (c) => (c?.key === editionKey ? c.edition : null),
+        )) ?? (await this.deps.overview(run.date, introductions));
+      await writeJSON(editionPath, { key: editionKey, edition });
       const draft = composeBlogDraft(run.date, projects, edition, assets);
       run.progress = "检查正文、标题和五张配图";
       await this.persist();
       const quality = checkBlogDraft(draft, projects);
+      history = await featuredHistory(
+        this.directory,
+        await (this.deps.history ?? scanFeaturedPosts)(),
+      );
+      if (projects.some((p) => duplicateFeature(p.source, history)))
+        throw new ApiError(
+          409,
+          "DAILY_CONCURRENT_DUPLICATE",
+          "生成期间项目已被其他稿件介绍，稍后重新选题",
+        );
       await this.writer!(draft);
+      await rememberFeatured(
+        this.directory,
+        projects.map((p) => ({
+          repo: p.source.name,
+          id: p.source.repositoryId,
+          slug: draft.slug,
+          date: run.date,
+          recordedAt: this.deps.now().toISOString(),
+        })),
+      );
       run.quality = quality;
       run.state = "done";
       run.slug = draft.slug;

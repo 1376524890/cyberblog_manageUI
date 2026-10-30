@@ -181,6 +181,7 @@ daily.setWriter(async (draft) => {
       body: JSON.stringify({
         ...(body as Record<string, unknown>),
         assets: draft.assets,
+        githubRepos: draft.githubRepos,
       }),
     });
     return { status: response.status, data: await response.json() };

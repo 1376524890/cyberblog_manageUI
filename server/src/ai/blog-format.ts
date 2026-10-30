@@ -4,11 +4,12 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "reviewed-blog-png-v4",
+  version: "reviewed-unique-blog-png-v5",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [
     "获取每日榜单",
+    "排除历史已介绍项目",
     "规划核心链路",
     "选读关键模块",
     "撰写博客正文",
@@ -28,6 +29,7 @@ export interface BlogDraft {
   data: Record<string, unknown>;
   body: string;
   assets: ImageAsset[];
+  githubRepos: { name: string; id?: number }[];
 }
 export interface BlogQuality {
   workflowVersion: string;
@@ -71,6 +73,10 @@ export function composeBlogDraft(
   const names = projects.map((p) => p.source.name.split("/")[1]).join("、");
   return {
     slug,
+    githubRepos: projects.map((p) => ({
+      name: p.source.name,
+      id: p.source.repositoryId,
+    })),
     data: {
       title: `GitHub 每日开源精选 · ${date}`,
       published: date,

@@ -21,7 +21,7 @@ if (process.env.CMS_DAILY_QA_SEED) {
   const seed = path.resolve(process.env.CMS_DAILY_QA_SEED);
   for (const name of [
     "ranking.json",
-    ...Array.from({ length: 5 }, (_, i) => `${i + 1}-source-v4.json`),
+    ...Array.from({ length: 5 }, (_, i) => `${i + 1}-source-v5.json`),
   ]) {
     try {
       await fs.access(path.join(dir, name));
@@ -32,6 +32,7 @@ if (process.env.CMS_DAILY_QA_SEED) {
 }
 let clock = new Date(`${date}T08:00:00+08:00`);
 const runner = new DailyService(root, {
+  history: async () => [],
   trending,
   evidence,
   generate: authorReviewedProject,
