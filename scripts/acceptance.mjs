@@ -252,7 +252,7 @@ console.log("== 11. 登出与静态托管 ==");
 	const out = await req("POST", "/auth/logout");
 	check("登出 200", out.status === 200);
 
-	const html = await fetch("http://127.0.0.1:8787/");
+const html = await fetch(`http://127.0.0.1:${process.env.PORT ?? 8787}/`);
 	check("前端 index.html 可访问", html.status === 200 && (await html.text()).includes("CyberBlog"));
 }
 
