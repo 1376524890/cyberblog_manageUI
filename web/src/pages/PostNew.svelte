@@ -1,22 +1,385 @@
 <script lang="ts">
- import {onMount} from 'svelte';import {api,navigate,contentSaved,setUnsavedChanges} from '../lib/api.ts';import {messageOf,today} from '../lib/content.ts';import Icon from '../components/Icon.svelte';
- interface Series{name:string;count:number;filePrefix:string|null;slugs:string[];orders:number[];}
- let title='',filename='',category='',tags='',choice='',newSeries='',seriesOrder:number|undefined=undefined,draft=true,busy=false,error='',available:boolean|null=null,checking=false,loaded=false;
- let meta:{categories:{name:string}[]}|null=null,seriesList:Series[]=[],manual=false;
- let requestId=0,timer:ReturnType<typeof setTimeout>;
- $: finalSeries=choice==='__new'?newSeries:choice;
- $: setUnsavedChanges(!!(title||filename||category||tags||choice));
- async function suggest(){if(manual)return;clearTimeout(timer);available=null;const id=++requestId;const input=title.trim();if(!input){filename='';return;}timer=setTimeout(async()=>{checking=true;try{const r=await api.post<{slug:string;available:boolean}>('/slug-preview',{title:input});if(id===requestId&&!manual){filename=r.slug;available=r.available;}}catch(e){if(id===requestId)error=messageOf(e);}finally{if(id===requestId)checking=false;}},300);}
- function manualInput(){manual=true;available=null;requestId++;checking=false;clearTimeout(timer);}
- function changeSeries(){seriesOrder=undefined;const s=seriesList.find(s=>s.name===choice);if(!s)return;seriesOrder=Math.max(0,...s.orders)+1;if(s.filePrefix&&!manual){const nums=s.slugs.map(sl=>Number(sl.match(/(\d{2,})$/)?.[1]??0));filename=`${s.filePrefix}-${String(Math.max(0,...nums)+1).padStart(2,'0')}`;manual=true;available=null;requestId++;checking=false;clearTimeout(timer);}}
- async function create(){if(busy)return;error='';if(!title.trim()){error='请填写标题';return;}if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(filename)){error='文件标识仅支持小写字母、数字和短横线';return;}if(choice==='__new'&&!newSeries.trim()){error='请填写新系列名称';return;}if(seriesOrder!==undefined&&(!Number.isInteger(seriesOrder)||seriesOrder<1)){error='章节序号必须为正整数';return;}busy=true;try{
-  const checked=await api.post<{slug:string;available:boolean}>('/slug-preview',{filename});available=checked.available;if(checked.slug!==filename)throw new Error('请检查文件标识格式');if(!checked.available)throw new Error('文件标识已被占用，请修改后重试');
-  await api.post('/posts',{slug:filename,data:{title:title.trim(),published:today(),description:'',category:category||null,tags:tags.split(/[,，]/).map(t=>t.trim()).filter(Boolean),series:finalSeries.trim(),...(seriesOrder!==undefined?{seriesOrder}:{}),draft},body:`# ${title.trim()}\n`,commit:true});setUnsavedChanges(false);contentSaved();navigate(`/posts/${filename}`);
- }catch(e){error=messageOf(e);}finally{busy=false;}}
- function unload(e:BeforeUnloadEvent){if(title||filename||category||tags||choice){e.preventDefault();e.returnValue='';}}
- onMount(()=>{void Promise.all([api.get<typeof meta>('/meta'),api.get<{items:Series[]}>('/series')]).then(([m,s])=>{meta=m;seriesList=s.items;const selected=new URLSearchParams(location.hash.split('?')[1]??'').get('series');if(selected&&seriesList.some(s=>s.name===selected)){choice=selected;changeSeries();}loaded=true;}).catch(e=>error=messageOf(e));window.addEventListener('beforeunload',unload);return()=>{clearTimeout(timer);requestId++;setUnsavedChanges(false);window.removeEventListener('beforeunload',unload);};});
+  import { onMount } from "svelte";
+  import {
+    api,
+    navigate,
+    contentSaved,
+    setUnsavedChanges,
+  } from "../lib/api.ts";
+  import { messageOf, today } from "../lib/content.ts";
+  import TagPicker from "../components/TagPicker.svelte";
+  import Icon from "../components/Icon.svelte";
+  interface Series {
+    name: string;
+    count: number;
+    filePrefix: string | null;
+    slugs: string[];
+    orders: number[];
+  }
+  let title = "",
+    filename = "",
+    category = "",
+    tags = "",
+    choice = "",
+    newSeries = "",
+    seriesOrder: number | undefined = undefined,
+    draft = true,
+    busy = false,
+    error = "",
+    available: boolean | null = null,
+    checking = false,
+    loaded = false;
+  let meta: { categories: { name: string }[] } | null = null,
+    seriesList: Series[] = [],
+    manual = false;
+  let template = "",
+    templates: { id: string; name: string; body: string }[] = [];
+  let requestId = 0,
+    timer: ReturnType<typeof setTimeout>;
+  $: finalSeries = choice === "__new" ? newSeries : choice;
+  $: setUnsavedChanges(!!(title || filename || category || tags || choice));
+  async function suggest() {
+    if (manual) return;
+    clearTimeout(timer);
+    available = null;
+    const id = ++requestId;
+    const input = title.trim();
+    if (!input) {
+      filename = "";
+      return;
+    }
+    timer = setTimeout(async () => {
+      checking = true;
+      try {
+        const r = await api.post<{ slug: string; available: boolean }>(
+          "/slug-preview",
+          { title: input },
+        );
+        if (id === requestId && !manual) {
+          filename = r.slug;
+          available = r.available;
+        }
+      } catch (e) {
+        if (id === requestId) error = messageOf(e);
+      } finally {
+        if (id === requestId) checking = false;
+      }
+    }, 300);
+  }
+  function manualInput() {
+    manual = true;
+    available = null;
+    requestId++;
+    checking = false;
+    clearTimeout(timer);
+  }
+  function changeSeries() {
+    seriesOrder = undefined;
+    const s = seriesList.find((s) => s.name === choice);
+    if (!s) return;
+    seriesOrder = Math.max(0, ...s.orders) + 1;
+    if (s.filePrefix && !manual) {
+      const nums = s.slugs.map((sl) => Number(sl.match(/(\d{2,})$/)?.[1] ?? 0));
+      filename = `${s.filePrefix}-${String(Math.max(0, ...nums) + 1).padStart(2, "0")}`;
+      manual = true;
+      available = null;
+      requestId++;
+      checking = false;
+      clearTimeout(timer);
+    }
+  }
+  async function create() {
+    if (busy) return;
+    error = "";
+    if (!title.trim()) {
+      error = "请填写标题";
+      return;
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(filename)) {
+      error = "文件标识仅支持小写字母、数字和短横线";
+      return;
+    }
+    if (choice === "__new" && !newSeries.trim()) {
+      error = "请填写新系列名称";
+      return;
+    }
+    if (
+      seriesOrder !== undefined &&
+      (!Number.isInteger(seriesOrder) || seriesOrder < 1)
+    ) {
+      error = "章节序号必须为正整数";
+      return;
+    }
+    busy = true;
+    try {
+      const checked = await api.post<{ slug: string; available: boolean }>(
+        "/slug-preview",
+        { filename },
+      );
+      available = checked.available;
+      if (checked.slug !== filename) throw new Error("请检查文件标识格式");
+      if (!checked.available) throw new Error("文件标识已被占用，请修改后重试");
+      await api.post("/posts", {
+        slug: filename,
+        data: {
+          title: title.trim(),
+          published: today(),
+          description: "",
+          category: category || null,
+          tags: tags
+            .split(/[,，]/)
+            .map((t) => t.trim())
+            .filter(Boolean),
+          series: finalSeries.trim(),
+          ...(seriesOrder !== undefined ? { seriesOrder } : {}),
+          draft,
+        },
+        body: (
+          templates.find((t) => t.id === template)?.body ?? `# {{title}}\n`
+        )
+          .replaceAll("{{title}}", title.trim())
+          .replaceAll("{{date}}", today()),
+        commit: true,
+      });
+      setUnsavedChanges(false);
+      contentSaved();
+      navigate(`/posts/${filename}`);
+    } catch (e) {
+      error = messageOf(e);
+    } finally {
+      busy = false;
+    }
+  }
+  function unload(e: BeforeUnloadEvent) {
+    if (title || filename || category || tags || choice) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  }
+  onMount(() => {
+    void api
+      .get<{ items: typeof templates }>("/templates?collection=posts")
+      .then((r) => (templates = r.items))
+      .catch((e) => (error = messageOf(e)));
+    void Promise.all([
+      api.get<typeof meta>("/meta"),
+      api.get<{ items: Series[] }>("/series"),
+    ])
+      .then(([m, s]) => {
+        meta = m;
+        seriesList = s.items;
+        const selected = new URLSearchParams(
+          location.hash.split("?")[1] ?? "",
+        ).get("series");
+        if (selected && seriesList.some((s) => s.name === selected)) {
+          choice = selected;
+          changeSeries();
+        }
+        loaded = true;
+      })
+      .catch((e) => (error = messageOf(e)));
+    window.addEventListener("beforeunload", unload);
+    return () => {
+      clearTimeout(timer);
+      requestId++;
+      setUnsavedChanges(false);
+      window.removeEventListener("beforeunload", unload);
+    };
+  });
 </script>
-<div class="page-heading"><div><div class="eyebrow">CONTENT / NEW ARTICLE</div><h1>开始一篇新文章</h1><p class="muted">先给灵感一个名字，再慢慢写成故事。</p></div><a class="button" href="#/posts">← 返回文章</a></div>
+
+<div class="page-heading">
+  <div>
+    <div class="eyebrow">CONTENT / NEW ARTICLE</div>
+    <h1>开始一篇新文章</h1>
+    <p class="muted">先给灵感一个名字，再慢慢写成故事。</p>
+  </div>
+  <a class="button" href="#/posts">← 返回文章</a>
+</div>
 {#if error}<div class="err" role="alert">{error}</div>{/if}
-<div class="new-layout"><form class="panel" on:submit|preventDefault={create}><div class="panel-head"><h2>文章基本信息</h2><span class="badge neutral">NEW ARTICLE</span></div><div class="panel-body form-grid"><label class="form-field wide">文章标题<input bind:value={title} on:input={suggest} placeholder="给这次探索起个名字" required/></label><label class="form-field wide">文件标识 · URL 与文件名<input bind:value={filename} on:input={manualInput} placeholder="根据标题自动生成，也可手动输入" required pattern="[a-z0-9]+(-[a-z0-9]+)*"/><small class="hint">{checking?'正在生成…':available===false?'该文件标识已存在，请修改':available===true?'标识可用，创建前会再次检查':'小写字母、数字和短横线；创建后不可修改。'}</small></label><label class="form-field">分类<input bind:value={category} list="new-categories" placeholder="选择或输入分类"/><datalist id="new-categories">{#each meta?.categories??[] as c}<option value={c.name}></option>{/each}</datalist></label><label class="form-field">标签<input bind:value={tags} placeholder="例如 Python, 入门指南"/></label><div class="wide divider"></div><label class="form-field wide">所属系列<select bind:value={choice} on:change={changeSeries} disabled={!loaded}><option value="">独立文章，不加入系列</option>{#each seriesList as s}<option value={s.name}>{s.name} · {s.count} 篇</option>{/each}<option value="__new">＋ 创建新系列</option></select></label>{#if choice==='__new'}<label class="form-field">新系列名称<input bind:value={newSeries} required placeholder="例如 Rust 入门教程"/></label>{/if}{#if choice}<label class="form-field">章节序号<input type="number" min="1" step="1" bind:value={seriesOrder}/></label>{/if}<label class="check-field wide"><input type="checkbox" bind:checked={draft}/>创建为草稿，准备好后再公开</label></div><div class="form-actions"><span class="hint">创建后进入正文编辑器</span><button class="primary" type="submit" disabled={busy||checking}>{busy?'正在创建…':'创建并开始写作'}<Icon name="arrow" size={15}/></button></div></form><aside><div class="tip-card"><span class="stat-icon"><Icon name="article" size={21}/></span><h3>好文章，始于一个想法。</h3><p>支持 Markdown 正文、图片上传、系列归组与访问密码。</p><hr/><h3>创作与发布</h3><p>01 · 创建文章并编辑正文<br/>02 · 保存内容到仓库<br/>03 · 在发布中心推送更新</p><small>草稿即使推送，也不会出现在博客前台。</small></div></aside></div>
-<style>.new-layout{display:grid;grid-template-columns:minmax(0,750px) minmax(220px,1fr);gap:26px}.form-grid{padding:27px;gap:23px 20px}.divider{height:1px;background:#eff2f7;margin:3px 0}.form-actions{display:flex;align-items:center;justify-content:space-between;padding:21px 27px;border-top:1px solid #e8ecf3;gap:10px}.form-actions .hint{font-size:11px}.tip-card{padding:27px;background:#eef1fa;border:1px solid #e4e9f6;border-radius:12px}.tip-card h3{font-size:13px;color:#6f7e9d;margin:22px 0 12px}.tip-card p{font-size:12px;color:#929eb7;line-height:2}.tip-card hr{border:0;border-top:1px solid #dfe5f1;margin:25px 0}.tip-card small{font-size:10px;color:#a0acc3;line-height:1.8}@media(max-width:1100px){.new-layout{grid-template-columns:1fr}.new-layout aside{display:none}}@media(max-width:760px){.form-actions{padding:20px}.form-actions .hint{display:none}.form-actions button{width:100%}.form-grid{padding:20px}}</style>
+<div class="new-layout">
+  <form class="panel" on:submit|preventDefault={create}>
+    <div class="panel-head">
+      <h2>文章基本信息</h2>
+      <span class="badge neutral">NEW ARTICLE</span>
+    </div>
+    <div class="panel-body form-grid">
+      <label class="form-field wide"
+        >文章标题<input
+          bind:value={title}
+          on:input={suggest}
+          placeholder="给这次探索起个名字"
+          required
+        /></label
+      ><label class="form-field wide"
+        >文件标识 · URL 与文件名<input
+          bind:value={filename}
+          on:input={manualInput}
+          placeholder="根据标题自动生成，也可手动输入"
+          required
+          pattern="[a-z0-9]+(-[a-z0-9]+)*"
+        /><small class="hint"
+          >{checking
+            ? "正在生成…"
+            : available === false
+              ? "该文件标识已存在，请修改"
+              : available === true
+                ? "标识可用，创建前会再次检查"
+                : "小写字母、数字和短横线；创建后不可修改。"}</small
+        ></label
+      ><label class="form-field"
+        >分类<input
+          bind:value={category}
+          list="new-categories"
+          placeholder="选择或输入分类"
+        /><datalist id="new-categories"
+          >{#each meta?.categories ?? [] as c}<option value={c.name}
+            ></option>{/each}</datalist
+        ></label
+      >
+      <div class="form-field">
+        <span>标签</span><TagPicker
+          bind:value={tags}
+          suggestions={["编程入门", "教程", "社团活动", "技术分享"]}
+        />
+      </div>
+      <div class="wide divider"></div>
+      <label class="form-field wide"
+        >所属系列<select
+          bind:value={choice}
+          on:change={changeSeries}
+          disabled={!loaded}
+          ><option value="">独立文章，不加入系列</option
+          >{#each seriesList as s}<option value={s.name}
+              >{s.name} · {s.count} 篇</option
+            >{/each}<option value="__new">＋ 创建新系列</option></select
+        ></label
+      >{#if choice === "__new"}<label class="form-field"
+          >新系列名称<input
+            bind:value={newSeries}
+            required
+            placeholder="例如 Rust 入门教程"
+          /></label
+        >{/if}{#if choice}<label class="form-field"
+          >章节序号<input
+            type="number"
+            min="1"
+            step="1"
+            bind:value={seriesOrder}
+          /></label
+        >{/if}<label class="form-field wide"
+        >正文模板<select bind:value={template}
+          ><option value="">空白文章</option>{#each templates as t}<option
+              value={t.id}>{t.name}</option
+            >{/each}</select
+        ><small class="hint">创建后可继续在编辑器中插入其他模板。</small></label
+      ><label class="check-field wide"
+        ><input
+          type="checkbox"
+          bind:checked={draft}
+        />创建为草稿，准备好后再公开</label
+      >
+    </div>
+    <div class="form-actions">
+      <span class="hint">创建后进入正文编辑器</span><button
+        class="primary"
+        type="submit"
+        disabled={busy || checking}
+        >{busy ? "正在创建…" : "创建并开始写作"}<Icon
+          name="arrow"
+          size={15}
+        /></button
+      >
+    </div>
+  </form>
+  <aside>
+    <div class="tip-card">
+      <span class="stat-icon"><Icon name="article" size={21} /></span>
+      <h3>好文章，始于一个想法。</h3>
+      <p>支持 Markdown 正文、图片上传、系列归组与访问密码。</p>
+      <hr />
+      <h3>创作与发布</h3>
+      <p>
+        01 · 创建文章并编辑正文<br />02 · 保存内容到仓库<br />03 ·
+        在发布中心推送更新
+      </p>
+      <small>草稿即使推送，也不会出现在博客前台。</small>
+    </div>
+  </aside>
+</div>
+
+<style>
+  .new-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 750px) minmax(220px, 1fr);
+    gap: 26px;
+  }
+  .form-grid {
+    padding: 27px;
+    gap: 23px 20px;
+  }
+  .divider {
+    height: 1px;
+    background: #eff2f7;
+    margin: 3px 0;
+  }
+  .form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 21px 27px;
+    border-top: 1px solid #e8ecf3;
+    gap: 10px;
+  }
+  .form-actions .hint {
+    font-size: 11px;
+  }
+  .tip-card {
+    padding: 27px;
+    background: #eef1fa;
+    border: 1px solid #e4e9f6;
+    border-radius: 12px;
+  }
+  .tip-card h3 {
+    font-size: 13px;
+    color: #6f7e9d;
+    margin: 22px 0 12px;
+  }
+  .tip-card p {
+    font-size: 12px;
+    color: #929eb7;
+    line-height: 2;
+  }
+  .tip-card hr {
+    border: 0;
+    border-top: 1px solid #dfe5f1;
+    margin: 25px 0;
+  }
+  .tip-card small {
+    font-size: 10px;
+    color: #a0acc3;
+    line-height: 1.8;
+  }
+  @media (max-width: 1100px) {
+    .new-layout {
+      grid-template-columns: 1fr;
+    }
+    .new-layout aside {
+      display: none;
+    }
+  }
+  @media (max-width: 760px) {
+    .form-actions {
+      padding: 20px;
+    }
+    .form-actions .hint {
+      display: none;
+    }
+    .form-actions button {
+      width: 100%;
+    }
+    .form-grid {
+      padding: 20px;
+    }
+  }
+</style>

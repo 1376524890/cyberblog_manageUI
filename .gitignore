@@ -20,3 +20,7 @@ test-fixtures/
 # 服务器隔离预览与运行日志
 ui-fixtures/
 ui-preview.log
+
+# AI runtime configuration and audit
+.runtime/
+ai-preview.log
