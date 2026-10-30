@@ -1,0 +1,19 @@
+{
+	"name": "cyberblog-manage",
+	"private": true,
+	"version": "0.1.0",
+	"description": "Cyber先锋社博客内容管理 WebUI（后端 + 前端），独立于博客仓库",
+	"packageManager": "pnpm@9.15.9",
+	"scripts": {
+		"install:all": "pnpm --dir server install && pnpm --dir web install",
+		"dev:server": "pnpm --dir server dev",
+		"dev:web": "pnpm --dir web dev",
+		"build": "pnpm --dir server build && pnpm --dir web build",
+		"typecheck": "pnpm --dir server typecheck && pnpm --dir web typecheck",
+		"fixtures": "node scripts/make-fixtures.mjs",
+		"acceptance": "node scripts/acceptance.mjs"
+	},
+	"engines": {
+		"node": ">=22"
+	}
+}

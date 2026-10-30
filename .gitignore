@@ -1,0 +1,17 @@
+# 构建产物
+dist/
+node_modules/
+*.tmp
+
+# 测试夹具（由脚本生成）
+test-fixtures/
+
+# 环境与密钥（严禁入库）
+.env
+.env.*
+*.pem
+
+# 编辑器
+.idea/
+.DS_Store
+._*
