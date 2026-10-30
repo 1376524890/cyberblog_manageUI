@@ -20,10 +20,12 @@
 		busy = true;
 		try {
 			await api.post("/auth/login", { password });
+			// 重载让 App 重新执行认证检查（authed 在 App 启动时一次性判定，
+			// 仅改 hash 不会切换主界面）
 			location.hash = "/posts";
+			location.reload();
 		} catch (e) {
 			error = e instanceof ApiClientError ? e.message : "登录失败";
-		} finally {
 			busy = false;
 		}
 	}
