@@ -1,3 +1,5 @@
+import sharp from "../server/node_modules/sharp/lib/index.js";
+import { renderArchitecturePNG } from "../server/src/ai/architecture.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -6,7 +8,6 @@ import {
   DailyService,
   dayInShanghai,
   nextRun,
-  diagram,
   validateAnalysis,
 } from "../server/src/ai/daily.ts";
 import { parseTrending } from "../server/src/ai/github.ts";
@@ -67,15 +68,28 @@ const makeEvidence = (repo) => ({
   ],
 });
 const makeAnalysis = () => ({
-  intro: "代码介绍。".repeat(30),
-  codeAnalysis: "入口引用模块，关系依据样本推导。".repeat(20),
-  audience: "适合阅读源码与研究项目组织方式的开发者。".repeat(4),
-  limitations: "没有执行代码或完整审计，结论仅依据本次样本。".repeat(4),
+  headline: "用代码串起日常开发",
+  paragraphs: Array.from({ length: 6 }, (_, i) =>
+    "这个项目把常见的开发步骤整理成可以直接使用的模块，入口接收请求后交给核心逻辑处理，再由数据层保存结果。沿着文件之间的协作关系阅读，容易找到适合自己项目的实现方式，也可以从一个具体任务开始了解整套设计。".repeat(
+      2,
+    ),
+  ),
+  diagramTitle: "从入口到核心模块的协作",
   nodes: [
-    { label: "入口", path: "src/main.ts" },
-    { label: "模块", path: "src/lib.ts" },
+    {
+      label: "入口",
+      path: "src/main.ts",
+      description: "接收任务并调用模块",
+      layer: "entry",
+    },
+    {
+      label: "业务模块",
+      path: "src/lib.ts",
+      description: "处理任务并返回结果",
+      layer: "core",
+    },
   ],
-  edges: [{ from: 0, to: 1, label: "导入", evidence: "src/main.ts" }],
+  edges: [{ from: 0, to: 1, label: "调用", evidence: "src/main.ts" }],
 });
 const ev = makeEvidence(ranking[0]);
 assert.throws(() =>
@@ -90,22 +104,50 @@ assert.throws(() =>
 checks++;
 assert.throws(() =>
   validateAnalysis(
-    { ...makeAnalysis(), intro: "<script>attack</script>".repeat(5) },
+    {
+      ...makeAnalysis(),
+      paragraphs: [
+        "<script>attack</script>".repeat(5),
+        ...makeAnalysis().paragraphs.slice(1),
+      ],
+    },
     ev,
   ),
 );
 checks++;
 assert.throws(() =>
   validateAnalysis(
-    { ...makeAnalysis(), intro: "介绍".repeat(60) + " https://evil.test/" },
+    {
+      ...makeAnalysis(),
+      paragraphs: [
+        "介绍".repeat(60) + " https://evil.test/",
+        ...makeAnalysis().paragraphs.slice(1),
+      ],
+    },
     ev,
   ),
 );
 checks++;
-check(
-  "Diagram restricted to graph syntax",
-  diagram(makeAnalysis()).includes('n0 -->|"导入"| n1'),
+assert.throws(() =>
+  validateAnalysis(
+    {
+      ...makeAnalysis(),
+      paragraphs: [
+        "本次分析未执行代码，不能代表整体架构。" + makeAnalysis().paragraphs[0],
+        ...makeAnalysis().paragraphs.slice(1),
+      ],
+    },
+    ev,
+  ),
 );
+checks++;
+const png = await renderArchitecturePNG("example/project", makeAnalysis());
+const metadata = await sharp(png).metadata();
+check(
+  "Architecture exported as a real high-resolution PNG",
+  metadata.format === "png" && metadata.width === 1800 && png.length > 10000,
+);
+
 const dir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-test-"),
 );
@@ -116,6 +158,12 @@ const deps = {
     generated++;
     return { model: "mock", analysis: makeAnalysis() };
   },
+  overview: async (date) => ({
+    title: `开源精选 ${date}`,
+    lead: "开发中的许多麻烦，都可以从开源项目里找到细致的解法。".repeat(5),
+    closing:
+      "把这些设计放回自己的开发环境，便能找到适合继续研究的方向。".repeat(3),
+  }),
   now: () => now,
 };
 const service = new DailyService(dir, deps);
@@ -176,10 +224,53 @@ check(
   post.data.draft === true && !post.data.password,
 );
 check(
-  "Article contains five diagrams and pinned source links",
-  post.body.match(/```mermaid/g).length === 5 &&
-    post.body.includes("a".repeat(40)),
+  "Article contains five PNG embeds and no report template",
+  (post.body.match(/!\[/g) ?? []).length === 5 &&
+    !post.body.includes("```mermaid") &&
+    !post.body.includes("阅读与复核说明"),
 );
+const files = execFileSync(
+  "git",
+  ["show", "--name-only", "--format=", "HEAD"],
+  { cwd: process.env.CMS_REPO_PATH, encoding: "utf8" },
+);
+check(
+  "Five PNGs committed together with article",
+  files.split("\n").filter((f) => f.endsWith(".png")).length === 5,
+);
+const invalid = await fetch(base + "/posts", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({
+    slug: "reject-image",
+    data: { title: "Bad", published: "2026-10-30" },
+    body: "bad",
+    assets: [{ name: "../bad.png", data: png.toString("base64") }],
+  }),
+});
+check("Rejects image path traversal", invalid.status === 422);
+const invalidPNG = await fetch(base + "/posts", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({
+    slug: "reject-png",
+    data: { title: "Bad", published: "2026-10-30" },
+    body: "bad",
+    assets: [
+      { name: "bad.png", data: Buffer.from("not a PNG").toString("base64") },
+    ],
+  }),
+});
+check(
+  "Rejects invalid PNG before writing article",
+  invalidPNG.status === 422 &&
+    !(await fs
+      .stat(
+        path.join(process.env.CMS_REPO_PATH, "src/content/posts/reject-png.md"),
+      )
+      .catch(() => null)),
+);
+
 check(
   "Creation did not push",
   execFileSync("git", ["rev-parse", "origin/main"], {

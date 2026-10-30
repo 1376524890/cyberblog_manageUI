@@ -163,7 +163,9 @@ daily.setWriter(async (draft) => {
   const p = await propose({
     operation: "create",
     collection: "posts",
-    ...draft,
+    slug: draft.slug,
+    data: draft.data,
+    body: draft.body,
     reason: "管理员授权的 GitHub 每日 Top 5 草稿任务",
   });
   const token = createSession().token;
@@ -176,7 +178,10 @@ daily.setWriter(async (draft) => {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...(body as Record<string, unknown>),
+        assets: draft.assets,
+      }),
     });
     return { status: response.status, data: await response.json() };
   });

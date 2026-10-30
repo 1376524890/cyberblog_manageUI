@@ -128,10 +128,11 @@
       </p>
     </section>
     <section class="panel daily-card">
-      <h2>图解与复核</h2>
+      <h2>博客与配图</h2>
       <p>{state.diagramEngine}</p>
       <p class="muted">
-        每个仓库附模块关系图和源码链接。图来自有限样本的推导，不能代替完整审计。模型用量计入
+        每个项目都有详细的功能介绍与实现讲解，配中文标注的 PNG
+        架构图片；图片随文章一起保存。模型用量计入
         <a href="#/ai-usage">Token 用量</a>，沿用
         <a href="#/ai-settings">AI 设置</a>及额度。
       </p>

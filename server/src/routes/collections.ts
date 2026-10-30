@@ -1,3 +1,4 @@
+import { bodyLimit } from "hono/body-limit";
 import { Hono } from "hono";
 import { z } from "zod";
 import { slugify, isValidSlug } from "../core/slugify.ts";
@@ -31,6 +32,20 @@ const versionSchema = z.object({
 });
 
 const writeBodySchema = z.object({
+  assets: z
+    .array(
+      z
+        .object({
+          name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,80}\.png$/),
+          data: z
+            .string()
+            .max(2800000)
+            .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+        })
+        .strict(),
+    )
+    .max(5)
+    .optional(),
   slug: z.string().optional(),
   data: z.record(z.unknown()),
   body: z.string().default(""),
@@ -209,72 +224,92 @@ export function collectionRoutes(collection: CollectionName): Hono {
   });
 
   // POST /
-  app.post("/", async (c) => {
-    const req = writeBodySchema.parse(await c.req.json());
-    validateCommit(req);
-    let slug = req.slug ?? "";
-    if (collection === "dynamic" && !slug) slug = dynamicSlug();
-    resolveSlugOrThrow(slug);
-    if (!isValidSlug(slug)) {
-      throw new ApiError(422, "VALIDATION_FAILED", `slug 非法: ${slug}`);
-    }
-    let data = { ...req.data };
-    const extra: Record<string, unknown> = {};
-    if (collection === "dynamic" && "title" in data) {
-      extra.title = data.title;
-      delete data.title;
-    }
-    // schema 校验（422 字段级）
-    const parsed = schemas[collection].safeParse(data);
-    if (!parsed.success) {
-      throw new ApiError(422, "VALIDATION_FAILED", "front matter 校验失败", {
-        issues: parsed.error.issues.map((i) => ({
-          field: i.path.join("."),
-          issue: i.message,
-        })),
-      });
-    }
-    const file = await writePost(collection, {
-      slug,
-      data: parsed.data as Record<string, unknown>,
-      extraFields: extra,
-      body: req.body,
-    });
-    let committed = false;
-    let commitSha: string | null = null;
-    let pendingPush = false;
-    if (req.commit) {
-      const msg =
-        req.commitMessage ?? defaultCommitMessage("add", collection, slug);
-      if (req.commitMessage && !isValidCommitMessage(req.commitMessage)) {
-        throw new ApiError(
-          422,
-          "VALIDATION_FAILED",
-          "commitMessage 不符合 Conventional Commits",
-        );
+  app.post(
+    "/",
+    bodyLimit({
+      maxSize: 16 * 1024 * 1024,
+      onError: (c) =>
+        c.json(
+          { error: { code: "BODY_LIMIT", message: "内容与附图总量超过限制" } },
+          413,
+        ),
+    }),
+    async (c) => {
+      const checked = writeBodySchema.safeParse(await c.req.json());
+      if (!checked.success)
+        throw new ApiError(422, "VALIDATION_FAILED", "内容或附图参数无效", {
+          issues: checked.error.issues.map((i) => ({
+            field: i.path.join("."),
+            issue: i.message,
+          })),
+        });
+      const req = checked.data;
+      validateCommit(req);
+      let slug = req.slug ?? "";
+      if (collection === "dynamic" && !slug) slug = dynamicSlug();
+      resolveSlugOrThrow(slug);
+      if (!isValidSlug(slug)) {
+        throw new ApiError(422, "VALIDATION_FAILED", `slug 非法: ${slug}`);
       }
-      const r = await commitPaths(
-        [file.filePath, `${COLLECTION_DIRS[collection]}/images/${file.slug}`],
-        msg,
+      let data = { ...req.data };
+      const extra: Record<string, unknown> = {};
+      if (collection === "dynamic" && "title" in data) {
+        extra.title = data.title;
+        delete data.title;
+      }
+      // schema 校验（422 字段级）
+      const parsed = schemas[collection].safeParse(data);
+      if (!parsed.success) {
+        throw new ApiError(422, "VALIDATION_FAILED", "front matter 校验失败", {
+          issues: parsed.error.issues.map((i) => ({
+            field: i.path.join("."),
+            issue: i.message,
+          })),
+        });
+      }
+      const file = await writePost(collection, {
+        slug,
+        data: parsed.data as Record<string, unknown>,
+        extraFields: extra,
+        body: req.body,
+        assets: req.assets,
+      });
+      let committed = false;
+      let commitSha: string | null = null;
+      let pendingPush = false;
+      if (req.commit) {
+        const msg =
+          req.commitMessage ?? defaultCommitMessage("add", collection, slug);
+        if (req.commitMessage && !isValidCommitMessage(req.commitMessage)) {
+          throw new ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "commitMessage 不符合 Conventional Commits",
+          );
+        }
+        const r = await commitPaths(
+          [file.filePath, `${COLLECTION_DIRS[collection]}/images/${file.slug}`],
+          msg,
+        );
+        committed = r.committed;
+        commitSha = r.commitSha;
+        pendingPush = r.pendingPush;
+      }
+      // commit 后 version.head 必须取新 HEAD，否则客户端下一次 PUT 会乐观锁误判
+      const head = await getHead();
+      return c.json(
+        {
+          slug: file.slug,
+          filePath: file.filePath,
+          version: { head, fileMtimeMs: file.version.fileMtimeMs },
+          committed,
+          commitSha,
+          pendingPush,
+        },
+        201,
       );
-      committed = r.committed;
-      commitSha = r.commitSha;
-      pendingPush = r.pendingPush;
-    }
-    // commit 后 version.head 必须取新 HEAD，否则客户端下一次 PUT 会乐观锁误判
-    const head = await getHead();
-    return c.json(
-      {
-        slug: file.slug,
-        filePath: file.filePath,
-        version: { head, fileMtimeMs: file.version.fileMtimeMs },
-        committed,
-        commitSha,
-        pendingPush,
-      },
-      201,
-    );
-  });
+    },
+  );
 
   // PUT /:slug
   app.put("/:slug", async (c) => {

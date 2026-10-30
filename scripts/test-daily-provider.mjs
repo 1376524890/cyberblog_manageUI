@@ -6,17 +6,28 @@ import { usageReport } from "../server/src/ai/usage.ts";
 if (!process.env.CMS_AI_ENV_FILE?.includes("test-fixtures/"))
   throw Error("Isolated settings required");
 const analysis = {
-  intro: "介绍项目用途与模块组织。".repeat(15),
-  codeAnalysis: "入口读取本地数据并调用模块，本次仅基于源码样本推导。".repeat(
-    15,
+  headline: "用代码串起日常开发",
+  paragraphs: Array.from({ length: 6 }, (_, i) =>
+    "这个项目把常见的开发步骤整理成可以直接使用的模块，入口接收请求后交给核心逻辑处理，再由数据层保存结果。沿着文件之间的协作关系阅读，容易找到适合自己项目的实现方式，也可以从一个具体任务开始了解整套设计。".repeat(
+      2,
+    ),
   ),
-  audience: "适合研究源码组织的开发者。".repeat(5),
-  limitations: "没有运行项目或完整审计。".repeat(5),
+  diagramTitle: "从入口到核心模块的协作",
   nodes: [
-    { label: "入口", path: "src/main.ts" },
-    { label: "模块", path: "src/lib.ts" },
+    {
+      label: "入口",
+      path: "src/main.ts",
+      description: "接收任务并调用模块",
+      layer: "entry",
+    },
+    {
+      label: "业务模块",
+      path: "src/lib.ts",
+      description: "处理任务并返回结果",
+      layer: "core",
+    },
   ],
-  edges: [{ from: 0, to: 1, label: "读取", evidence: "src/main.ts" }],
+  edges: [{ from: 0, to: 1, label: "调用", evidence: "src/main.ts" }],
 };
 let calls = 0,
   mode = "repair",

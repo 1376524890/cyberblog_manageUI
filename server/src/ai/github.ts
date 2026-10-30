@@ -7,6 +7,7 @@ export interface RankedRepo {
 }
 export interface Evidence extends RankedRepo {
   sha: string;
+  evidenceVersion?: number;
   codeSampled: boolean;
   description: string;
   stars: number;
@@ -144,7 +145,9 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
         p.length / 100;
       return score(a.path) - score(b.path);
     });
-  const picked = [readme, manifest, ...sources.slice(0, 2)].filter(Boolean);
+  const picked = [readme, manifest, ...selectSources(sources, 5)].filter(
+    Boolean,
+  );
   if (!picked.length)
     throw new ApiError(
       422,
@@ -170,6 +173,7 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
   return {
     ...repo,
     sha,
+    evidenceVersion: 2,
     codeSampled: files.some((f) => sources.some((s: any) => s.path === f.path)),
     description: String(meta.description ?? "").slice(0, 1000),
     stars: meta.stargazers_count,
@@ -183,5 +187,72 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     ],
     truncated: !!tree.truncated || blobs.length > 400,
     files,
+  };
+}
+
+function selectSources(files: any[], count: number) {
+  const scored = [...files].sort((a, b) => {
+    const score = (p: string) =>
+      (/(^|\/)(src|lib|app|server|backend|core)\//.test(p) ? -35 : 0) +
+      (/worker|session|agent|memory|storage|database|router|pipeline|client|manager|service|engine/i.test(
+        p,
+      )
+        ? -40
+        : 0) +
+      (/^(scripts|\.github|docs|tools)\//.test(p) ? 60 : 0) +
+      p.split("/").length * 4;
+    return score(a.path) - score(b.path);
+  });
+  const result: any[] = [];
+  for (const file of scored) {
+    const parent = file.path.split("/").slice(0, -1).join("/");
+    if (
+      result.filter((f) => f.path.split("/").slice(0, -1).join("/") === parent)
+        .length >= 2
+    )
+      continue;
+    result.push(file);
+    if (result.length === count) break;
+  }
+  return result;
+}
+export async function enrichEvidence(previous: Evidence): Promise<Evidence> {
+  const base = `/repos/${previous.name}`;
+  const tree = await api(`${base}/git/trees/${previous.sha}?recursive=1`);
+  const blobs = (tree.tree ?? []).filter(
+    (f: any) => f.type === "blob" && f.size > 0 && f.size < 250000,
+  );
+  const read = new Set(previous.files.map((f) => f.path));
+  const extra = selectSources(
+    blobs.filter(
+      (f: any) =>
+        !read.has(f.path) &&
+        /\.(ts|tsx|js|py|go|rs|java|cpp|svelte)$/.test(f.path) &&
+        !/(^|\/)(test|tests|fixtures|examples|vendor|node_modules|dist|\.github)\//.test(
+          f.path,
+        ) &&
+        !/\.d\.ts$/.test(f.path),
+    ),
+    3,
+  );
+  const files = [...previous.files];
+  for (const file of extra) {
+    const blob = await api(`${base}/git/blobs/${file.sha}`);
+    if (blob.encoding !== "base64") continue;
+    const text = Buffer.from(blob.content, "base64")
+      .toString("utf8")
+      .slice(0, 10000);
+    if (text.includes("\0")) continue;
+    files.push({
+      path: file.path,
+      text,
+      url: `https://github.com/${previous.name}/blob/${previous.sha}/${file.path.split("/").map(encodeURIComponent).join("/")}`,
+    });
+  }
+  return {
+    ...previous,
+    evidenceVersion: 2,
+    files,
+    tree: [...new Set([...previous.tree, ...files.map((f) => f.path)])],
   };
 }

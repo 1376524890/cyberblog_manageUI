@@ -80,22 +80,16 @@ CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_mo
 AI 设置现支持自动模型 ID 获取、分阶段连接诊断、每日/月度 token 额度；「Token 用量」可查看趋势、模型分组和调用明细。监控数据从此功能上线后开始记录，未返回 usage 的请求会标记为未上报。
 
 
-## GitHub 每日热门 Top 5 草稿
+## GitHub 每日开源博客
 
-管理界面 `#/github-daily`：启停计划、立即生成/重试、查看进度与历史、跳转草稿。每天北京时间 08:00 开始；服务端每 30 秒检查计划，关闭浏览器不影响。服务停机后恢复时补跑当天已过 08:00 的任务，不补历史日期。状态和源码快照存放在 AI `.env` 同目录 `.runtime/github-daily/`，不进入 Git。此目录需要随服务器备份保留。
+在 `#/github-daily` 启停每天北京时间 08:00 的计划、手动生成和查看草稿。任务在服务器运行，完成后只创建草稿，不推送发布；关闭浏览器不影响。每日去重，失败间隔至少 10 分钟自动重试两次，服务恢复后补跑当天遗漏任务。
 
-榜单严格采用 GitHub Trending `since=daily` 页面抓取时前五名，保留排序和快照时间；页面解析失败不替换为总星标榜。GitHub 公开 REST API 获取固定提交、目录树、README、项目清单及最多两份关键源码样本，不克隆或执行第三方代码。无认证 API 可能限流；失败会显示在任务记录中，不会编造替代资料。每份源码样本有长度限制；结构图只是样本推导，不是完整运行时调用图。
+专用写作配置 `DAILY_WRITING_BRIEF` 位于 `server/src/ai/daily.ts`，要求把每个项目写成 6–8 个详细、自然的博客段落，介绍用途、实际场景、使用方法与核心实现。不把采集过程、样本说明或审计免责声明写进文章。正文只围绕项目展开，开篇与收尾另由模型统一撰写。模型用量（包括格式修正）沿用 AI 设置与预算，并记入“GitHub 日报”。
 
-沿用当前 AI 设置的 OpenAI 兼容模型、预算与用量记录（分类 GitHub 日报），每个仓库独立分析，保留成功分析供重试复用。模型输出通过结构、路径、源码证据及链接校验后组装正文与五张 Mermaid 图。返回格式或证据引用不合格时，携带校验反馈要求模型修正一次；原调用与修正调用均计入 Token 用量，认证及预算错误不作格式重试。博客已有 Mermaid 服务端渲染，无需依赖第三方绘图站点；Archify 是 Agent 图表技能，本实现没有虚构其托管生成 API。
+GitHub Trending daily 前五名保持原排序；公开 REST API 获取固定提交的 README、清单和 5 份关键源码，重跑可从旧快照补读模块并缓存。内部快照和执行信息放在 `.env` 同目录 `.runtime/github-daily/`，不混入正文。源码不会被执行。公开 API 限流会在任务页显示。
 
-计划是管理员对每日固定范围创建草稿的明确委托。生成器强制 `draft:true`，仅调用原 Agent 的 `propose(create)` / `apply`，由认证内容 API 串行提交；绝不调用 publish，不设置文章密码，不修改现有文章。每日固定 slug `github-daily-YYYY-MM-DD`，既有同名内容保留，不覆盖人工编辑。成功每日最多一次；失败间隔至少 10 分钟，自动尝试总计最多 3 次，管理员仍可手动重试。`get_github_daily_status` / `start_github_daily` 允许在 AI 工作台查询或明确指令触发今日任务，模型不能更改日程。
+架构图使用自主实现的分层卡片、模块职责和正交连线布局，参考 Archify 的图形表达，直接由 sharp 导出 1800 像素宽的 PNG。图中中文使用开源 Noto CJK 字体，首次从 Noto 官方 GitHub 仓库下载并缓存在 runtime/fonts，也可用 `CMS_DIAGRAM_FONT` 指定已有字体。PNG 以普通 Markdown 图片插入正文，博客无需 Mermaid 或外部图片服务。
 
-测试（必须使用隔离夹具）：
+文章创建 API 支持可选 `assets:[{name,data}]`，仅允许最多 5 张有尺寸和体积限制的 PNG，拒绝路径穿越、重复名称、无效图片及覆盖既有图片目录。图片与文章在原串行写入链路中保存，同一次 Git 提交包含 Markdown 和全部图片。日报仍通过受限的 Agent propose/create 和 apply 保存，不能改动已有文章、设置密码或发布内容。
 
-```bash
-CMS_DAILY_SCHEDULER=off CMS_REPO_PATH="$PWD/test-fixtures/blog" CMS_AI_ENV_FILE="$PWD/test-fixtures/daily-test.env" CMS_ADMIN_PASSWORD=admin123 HOST=127.0.0.1 PORT=18793 server/node_modules/.bin/tsx scripts/test-daily.mjs
-```
-
-模型格式修正回归：`CMS_AI_ENV_FILE="$PWD/test-fixtures/daily-provider/.env" server/node_modules/.bin/tsx scripts/test-daily-provider.mjs`（每次运行使用空的独立目录，以便核对用量）。
-
-运行验收时可用 `CMS_DAILY_SCHEDULER=off` 关闭调度轮询。生产服务使用 systemd `cyber-cms` 的启动/重启保证进程存活；首次部署后需在页面开启计划。日期按 Asia/Shanghai 计算，不依赖服务器本地时区。
+开发验证：使用独立 `test-fixtures`，运行 `scripts/test-daily.mjs`、`scripts/test-daily-provider.mjs`，前者需要通过 `CMS_DIAGRAM_FONT` 指定已有中文字体。测试任务设置 `CMS_DAILY_SCHEDULER=off`。状态与素材快照应随服务器备份保留。
