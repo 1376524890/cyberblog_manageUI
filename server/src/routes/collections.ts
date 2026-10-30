@@ -204,24 +204,24 @@ export function collectionRoutes(collection: CollectionName): Hono {
 		resolveSlugOrThrow(slug);
 		const req = updateBodySchema.parse(await c.req.json());
 		await checkVersion(collection, slug, req.expected);
-		let data = { ...req.data };
-		if (collection === "dynamic" && "title" in data) {
-			// dynamic 的 title 属 extra，updatePost 内部保留
-			data = { ...data };
+		const existing = await getOne(collection, slug);
+		// 部分更新语义：未传字段保持原值 → 合并后再整体校验
+		const mergedInput: Record<string, unknown> = { ...existing.data, ...req.data };
+		for (const [k, v] of Object.entries(req.data)) {
+			if (v === null) delete mergedInput[k];
 		}
 		const parsed = schemas[collection].safeParse(
-			collection === "dynamic" ? stripDynamicTitle(data) : data,
+			collection === "dynamic" ? stripDynamicTitle(mergedInput) : mergedInput,
 		);
 		if (!parsed.success) {
 			throw new ApiError(422, "VALIDATION_FAILED", "front matter 校验失败", {
 				issues: parsed.error.issues.map((i) => ({ field: i.path.join("."), issue: i.message })),
 			});
 		}
-		const current = await getOne(collection, slug);
 		const file = await updatePost(collection, slug, {
-			data,
+			data: mergedInput,
 			extraFields: req.extraFields,
-			body: req.body ?? current.body,
+			body: req.body ?? existing.body,
 		});
 		let committed = false;
 		let commitSha: string | null = null;

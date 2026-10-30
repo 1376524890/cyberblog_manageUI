@@ -4,7 +4,8 @@
  * 再按 API 契约全链路验证。
  * 前置：pnpm fixtures && bash scripts/run-acceptance.sh
  */
-const BASE = "http://127.0.0.1:8787/api/v1";
+const BASE = `http://127.0.0.1:${process.env.PORT ?? 8787}/api/v1`;
+const PASSWORD = process.env.CMS_ADMIN_PASSWORD ?? "admin123";
 
 // 1) 若端口未监听则进程内启动服务器；已在监听则直接复用（如独立 dev 服务）
 async function portUp() {
@@ -63,10 +64,10 @@ console.log("== 1. 认证 ==");
 	let r = await req("GET", "/posts");
 	check("未认证访问被拒（401）", r.status === 401);
 
-	r = await req("POST", "/auth/login", { password: "wrong" });
+	r = await req("POST", "/auth/login", { password: "wrong-password" });
 	check("错误密码 401", r.status === 401);
 
-	r = await req("POST", "/auth/login", { password: "admin123" });
+	r = await req("POST", "/auth/login", { password: PASSWORD });
 	check("正确密码登录成功", r.status === 200 && r.json?.ok === true);
 	token = r.json?.token ?? "";
 	check("返回 Bearer token", typeof token === "string" && token.length > 10);
