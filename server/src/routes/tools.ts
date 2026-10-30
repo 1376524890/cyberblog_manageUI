@@ -102,6 +102,6 @@ export const toolRoutes = new Hono()
 	});
 
 function imagesDir(slug: string): string {
-	if (!slugMod.isValidSlug(slug)) throw new ApiError(400, "BAD_REQUEST", "非法 slug");
+	if (!isValidSlug(slug)) throw new ApiError(400, "BAD_REQUEST", "非法 slug");
 	return path.join(config.repoPath, "src/content/posts/images", slug);
 }
