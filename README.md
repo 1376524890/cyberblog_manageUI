@@ -71,3 +71,7 @@ CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_mo
 当前服务器开发目录：`/root/cyberblog-cms-work`；生产应用：`/root/cyberblog-cms-prod/app`；服务：`cyber-cms.service`。内容仓库由生产环境配置指定，应用部署不包含内容仓库及凭据文件。
 
 构建及依赖均在服务器操作。本地仅同步源码。发布前保存应用源码、构建产物及原版本号到 `/root/cyberblog-cms-backups/`。回退时停止服务，用对应备份恢复应用源码与 `web/dist` 后启动服务；保留现有依赖、环境配置及博客内容仓库。
+
+## AI 工作台与细化管理
+
+本轮增加成员交互设置、九类 Markdown 模板、AI 编辑助手、对话操作卡片与 AI 设置。首次使用在「AI 设置」填写模型服务信息；密钥安全保存在服务器 `server/.env`，默认关闭 AI，源码不附带真实密钥。详细使用、配置、操作边界和验证方式见 [AI 工作台文档](docs/ai-studio.md)。
