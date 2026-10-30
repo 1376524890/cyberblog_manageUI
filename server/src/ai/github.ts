@@ -191,7 +191,7 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
 }
 
 function selectSources(files: any[], count: number) {
-  const scored = [...files].sort((a, b) => {
+  const scored = [...files].filter(f => !/\.(test|spec)\./i.test(f.path)).sort((a, b) => {
     const score = (p: string) =>
       (/(^|\/)(src|lib|app|server|backend|core)\//.test(p) ? -35 : 0) +
       (/worker|session|agent|memory|storage|database|router|pipeline|client|manager|service|engine/i.test(

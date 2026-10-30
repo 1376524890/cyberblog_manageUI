@@ -119,6 +119,11 @@ export async function complete(
         store: false,
         ...(s.temperature === null ? {} : { temperature: s.temperature }),
         [s.tokenParameter ?? "max_tokens"]: s.maxTokens,
+        // DeepSeek Flash enables extended thinking by default; editorial requests
+        // need their output budget for article text and structured illustrations.
+        ...(kind === "daily" && /^(deepseek-flash|deepseek-v4-pro)$/i.test(s.model)
+          ? { thinking: { type: "disabled" } }
+          : {}),
         ...(tools ? { tools, tool_choice: "auto" } : {}),
       },
       signal,

@@ -1,3 +1,4 @@
+import {complete} from "../server/src/ai/provider.ts";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { generateAnalysis } from "../server/src/ai/daily.ts";
@@ -31,11 +32,12 @@ const analysis = {
 };
 let calls = 0,
   mode = "repair",
-  hasFeedback = false;
+  hasFeedback = false, lastRequest = null;
 const server = http.createServer(async (req, res) => {
   let text = "";
   for await (const c of req) text += c;
   const body = JSON.parse(text);
+  lastRequest = body;
   calls++;
   hasFeedback = body.messages.length > 2;
   if (mode === "auth") {
@@ -107,5 +109,13 @@ assert.equal(calls - authBefore, 1);
 console.log(
   "✓ Provider authentication errors are not retried as formatting errors",
 );
+mode = "good";
+const settings=await readSettings();
+await saveSettings({...settings,model:"deepseek-flash"});
+await generateAnalysis(source);
+assert.equal(lastRequest.thinking?.type,"disabled");
+await complete(await readSettings(),[{role:"user",content:"test"}],undefined,undefined,"chat");
+assert.equal(lastRequest.thinking,undefined);
+console.log("✓ Daily DeepSeek output controls preserve ordinary chat behavior");
 server.close();
-console.log("Daily provider regression: 4 checks passed");
+console.log("Daily provider regression: 5 checks passed");
