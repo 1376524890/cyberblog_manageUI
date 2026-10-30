@@ -168,7 +168,7 @@ export async function renderArchitecturePNG(
     } else if (from.row < to.row) {
       const x1 = from.x + cardW / 2 + ((i % 3) - 1) * 28;
       const x2 = to.x + cardW / 2 + ((i % 3) - 1) * 28;
-      const y = from.y + cardH + 58 + (i % 3) * 27;
+      const y = from.y + cardH + 52 + (i % 3) * 36;
       if (to.row === from.row + 1)
         d = `M${x1} ${from.y + cardH} V${y} H${x2} V${to.y - 8}`;
       else {
@@ -180,8 +180,8 @@ export async function renderArchitecturePNG(
     } else {
       const side = 34 + (i % 3) * 22;
       d = `M${from.x} ${from.y + cardH / 2} H${side} V${to.y - 44} H${to.x + cardW / 2} V${to.y - 8}`;
-      labelX = side + 20;
-      labelY = (from.y + to.y) / 2;
+      labelX = (side + to.x + cardW / 2) / 2 - 120;
+      labelY = to.y - 63;
     }
     geometries.push(
       `<path d="${d}" fill="none" stroke="#98a6bc" stroke-width="2.5" stroke-linejoin="round" marker-end="url(#arrow)"/>`,

@@ -1,5 +1,8 @@
-import {sourceLinesFromGitHubHTML,readPublicRepoFile} from "../server/src/ai/github.ts";
-import {complete} from "../server/src/ai/provider.ts";
+import {
+  sourceLinesFromGitHubHTML,
+  readPublicRepoFile,
+} from "../server/src/ai/github.ts";
+import { complete } from "../server/src/ai/provider.ts";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { generateAnalysis } from "../server/src/ai/daily.ts";
@@ -33,7 +36,8 @@ const analysis = {
 };
 let calls = 0,
   mode = "repair",
-  hasFeedback = false, lastRequest = null;
+  hasFeedback = false,
+  lastRequest = null;
 const server = http.createServer(async (req, res) => {
   let text = "";
   for await (const c of req) text += c;
@@ -111,21 +115,48 @@ console.log(
   "✓ Provider authentication errors are not retried as formatting errors",
 );
 mode = "good";
-const settings=await readSettings();
-await saveSettings({...settings,model:"deepseek-flash"});
+const settings = await readSettings();
+await saveSettings({ ...settings, model: "deepseek-flash" });
 await generateAnalysis(source);
-assert.equal(lastRequest.thinking?.type,"disabled");
-await complete(await readSettings(),[{role:"user",content:"test"}],undefined,undefined,"chat");
-assert.equal(lastRequest.thinking,undefined);
+assert.equal(lastRequest.thinking?.type, "disabled");
+await complete(
+  await readSettings(),
+  [{ role: "user", content: "test" }],
+  undefined,
+  undefined,
+  "chat",
+);
+assert.equal(lastRequest.thinking, undefined);
 console.log("✓ Daily DeepSeek output controls preserve ordinary chat behavior");
-const beforeRead=calls;let readCount=0;
-analysis.edges[0].evidence="src/lib.ts";
-await generateAnalysis({...source,files:[...source.files]},async(s,file)=>{readCount++;return {path:file,text:"export const task=()=>1;",url:`https://github.com/${s.name}/blob/${s.sha}/${file}`};});
-assert.equal(readCount,1);assert.equal(calls-beforeRead,2);
+const beforeRead = calls;
+let readCount = 0;
+analysis.edges[0].evidence = "src/lib.ts";
+await generateAnalysis(
+  { ...source, files: [...source.files] },
+  async (s, file) => {
+    readCount++;
+    return {
+      path: file,
+      text: "export const task=()=>1;",
+      url: `https://github.com/${s.name}/blob/${s.sha}/${file}`,
+    };
+  },
+);
+assert.equal(readCount, 1);
+assert.equal(calls - beforeRead, 2);
 console.log("✓ Reads referenced code before revising the blog and diagram");
-assert.equal(sourceLinesFromGitHubHTML('<script type="application/json">'+JSON.stringify({payload:{rawLines:["first","second"]}})+'</script>'),"first\nsecond");
+assert.equal(
+  sourceLinesFromGitHubHTML(
+    '<script type="application/json">' +
+      JSON.stringify({ payload: { rawLines: ["first", "second"] } }) +
+      "</script>",
+  ),
+  "first\nsecond",
+);
 console.log("✓ Extracts official GitHub source data without executing HTML");
-await assert.rejects(()=>readPublicRepoFile(source,"../private.env"));
-console.log("✓ Source reader rejects paths outside the selected repository tree");
+await assert.rejects(() => readPublicRepoFile(source, "../private.env"));
+console.log(
+  "✓ Source reader rejects paths outside the selected repository tree",
+);
 server.close();
 console.log("Daily provider regression: 8 checks passed");

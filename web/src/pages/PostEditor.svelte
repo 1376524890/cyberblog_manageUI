@@ -148,6 +148,7 @@
   $: dirty = ready && state !== snapshot;
   $: setUnsavedChanges(dirty);
   $: if (showPreview) void preview(body);
+  const previewImages = new Map<string, Promise<string>>();
   async function preview(text: string) {
     const id = ++previewId;
     const { marked } = await import("marked");
@@ -156,8 +157,32 @@
     for (const img of doc.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       const m = src.match(/^\.\/images\/([^/]+)\/([^/]+)$/);
-      if (m && m[1] === slug)
-        img.src = `${window.location.origin}/api/v1/${collection}/${encodeURIComponent(slug)}/images/${encodeURIComponent(m[2])}`;
+      if (m && m[1] === slug) {
+        const url = `${window.location.origin}/api/v1/${collection}/${encodeURIComponent(slug)}/images/${encodeURIComponent(m[2])}`;
+        try {
+          if (!previewImages.has(url))
+            previewImages.set(
+              url,
+              (async () => {
+                const response = await fetch(url, {
+                  credentials: "same-origin",
+                });
+                if (!response.ok) throw new Error("Image unavailable");
+                const blob = await response.blob();
+                return new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(String(reader.result));
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+              })(),
+            );
+          img.src = await previewImages.get(url)!;
+        } catch {
+          previewImages.delete(url);
+          img.removeAttribute("src");
+        }
+      }
     }
     if (id === previewId) previewHtml = doc.body.innerHTML;
   }
@@ -693,16 +718,33 @@ body{font:14px/1.9 system-ui;color:#334155;padding:20px;overflow-wrap:anywhere}i
               ><label class="check-field"
                 ><input type="checkbox" bind:checked={comment} />允许评论</label
               >
-              <label class="check-field"><input type="checkbox" bind:checked={passwordProtected} />启用文章密码保护</label>
-              <p class="hint">{passwordProtected ? "本文需要访问密码，与管理界面登录密码独立。" : "公开访问：文章无需密码，默认不启用保护。"}</p>
+              <label class="check-field"
+                ><input
+                  type="checkbox"
+                  bind:checked={passwordProtected}
+                />启用文章密码保护</label
+              >
+              <p class="hint">
+                {passwordProtected
+                  ? "本文需要访问密码，与管理界面登录密码独立。"
+                  : "公开访问：文章无需密码，默认不启用保护。"}
+              </p>
               {#if passwordProtected}
-                <label class="form-field">文章访问密码<input
-                  type="password"
-                  name="article-access-password"
-                  autocomplete="new-password"
-                  bind:value={password}
-                /></label>
-                <label class="form-field">密码提示<input name="article-password-hint" autocomplete="off" bind:value={passwordHint} /></label>
+                <label class="form-field"
+                  >文章访问密码<input
+                    type="password"
+                    name="article-access-password"
+                    autocomplete="new-password"
+                    bind:value={password}
+                  /></label
+                >
+                <label class="form-field"
+                  >密码提示<input
+                    name="article-password-hint"
+                    autocomplete="off"
+                    bind:value={passwordHint}
+                  /></label
+                >
               {/if}
             </div>
           </details>
