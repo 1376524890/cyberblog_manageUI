@@ -75,3 +75,5 @@ CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_mo
 ## AI 工作台与细化管理
 
 本轮增加成员交互设置、九类 Markdown 模板、AI 编辑助手、对话操作卡片与 AI 设置。首次使用在「AI 设置」填写模型服务信息；密钥安全保存在服务器 `server/.env`，默认关闭 AI，源码不附带真实密钥。详细使用、配置、操作边界和验证方式见 [AI 工作台文档](docs/ai-studio.md)。
+
+AI 设置现支持自动模型 ID 获取、分阶段连接诊断、每日/月度 token 额度；「Token 用量」可查看趋势、模型分组和调用明细。监控数据从此功能上线后开始记录，未返回 usage 的请求会标记为未上报。

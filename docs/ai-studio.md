@@ -66,3 +66,24 @@ CMS_REPO_PATH="$PWD/test-fixtures/blog" CMS_AI_ENV_FILE="$PWD/test-fixtures/ai/.
 ```
 
 AI 集成测试使用本机模拟接口，不需要真实密钥。覆盖两种调用模式、配置脱敏、字段/正文建议、头像提交、操作确认、幂等、冲突、创建删除和测试仓库推送。真实服务的可用性与模型工具能力须在填写实际配置后点击测试连接验证。
+
+## 用量监控、模型发现与诊断（2026-10-30）
+
+- 「Token 用量」提供今日/本月统计、7/30/90 天趋势、按模型筛选、成功率、耗时与最近 50 次请求 CSV 导出。页面可每 15 秒自动刷新。
+- 每次模型请求记录输入、输出、总量及服务商提供的缓存/推理细分值；一轮对话中的所有工具循环请求分别记录，并在对话结果里累计展示。连接测试也计入用量。
+- 接口不返回 usage 时标为「未上报」，不猜测 token 数。缓存/推理是细分项，不重复加到总量。数据仅涵盖此 CMS 从功能上线后发起的请求，不是账户总账单，不回补此前历史用量。
+- 记录保存在配置文件旁的 `.runtime/ai-usage-YYYY-MM.jsonl`，权限 0600，不包含密钥、提示词或正文；不进入 Git。
+- 设置支持每日/月度额度、预警比例以及达到额度后阻止后续请求。0 表示不限额。额度依据已上报数值，进行中请求及未上报用量可能超出，不等同于服务商硬限额。额度跨模型累计，模型筛选不改变额度计算。
+- 新增环境变量：`CMS_AI_DAILY_TOKEN_LIMIT`、`CMS_AI_MONTHLY_TOKEN_LIMIT`、`CMS_AI_USAGE_WARN_PERCENT`、`CMS_AI_ENFORCE_BUDGET`。旧配置默认不限制，旧客户端保存时保留现有额度配置。
+- 设置页在已有凭据时自动读取模型 ID，并支持搜索选择、手动刷新和自定义 ID。列表缓存 10 分钟；手动刷新绕过缓存。未保存的连接也可获取模型，但不会因此持久化密钥。
+- 连接地址变化时，必须重新输入对应服务的密钥，不把已保存密钥自动转发到新地址。
+- 「运行连通性测试」检查配置、模型列表与认证、实际生成，并可附加工具调用测试；显示耗时、失败代码和测试 token 用量。列表接口不支持时仍可测试实际生成。
+- `/ai/usage`、`/ai/diagnostics` 均受管理员认证保护。最近一次诊断保存在 `.runtime/ai-diagnostics.json`，切换连接/模型后不沿用旧结果。测试当前表单不等于保存配置。
+
+专项测试（与其他测试使用不同配置目录）：
+
+```bash
+CMS_REPO_PATH="$PWD/test-fixtures/blog" CMS_AI_ENV_FILE="$PWD/test-fixtures/observability/.env" PORT=18792 HOST=127.0.0.1 server/node_modules/.bin/tsx scripts/test-ai-observability.mjs
+```
+
+字段参考：[Chat Completions usage](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[模型列表](https://developers.openai.com/api/reference/resources/models/methods/list)。兼容服务可能不支持全部字段，管理界面会保留未上报状态。
