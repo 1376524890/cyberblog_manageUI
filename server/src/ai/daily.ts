@@ -474,7 +474,18 @@ export class DailyService {
           "DAILY_CONCURRENT_DUPLICATE",
           "生成期间项目已被其他稿件介绍，稍后重新选题",
         );
-      await this.writer!(draft);
+      const saved = await this.writer!(draft);
+      if (
+        saved &&
+        typeof saved === "object" &&
+        "existing" in saved &&
+        saved.existing === true
+      ) {
+        run.state = "done";
+        run.slug = draft.slug;
+        run.progress = "当日文章已存在，保留现有内容与选题记录";
+        return;
+      }
       await rememberFeatured(
         this.directory,
         projects.map((p) => ({

@@ -491,5 +491,17 @@ check(
   (await cacheService.status()).runs[0].state === "done" &&
     seenNames.filter((n) => n === "team/repo1").length === 2,
 );
+const preservedDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-preserve-"),
+);
+const preserved = new DailyService(preservedDir, deps);
+preserved.setWriter(async () => ({ existing: true }));
+await preserved.start();
+await preserved.wait();
+check(
+  "Preserved existing article does not claim new projects or quality approval",
+  (await featuredHistory(preservedDir)).length === 0 &&
+    !(await preserved.status()).runs[0].quality,
+);
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);
