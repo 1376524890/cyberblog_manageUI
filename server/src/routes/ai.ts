@@ -1,3 +1,10 @@
+import { usageReport } from "../ai/usage.ts";
+import {
+  connectionSettings,
+  discoverModels,
+  diagnose,
+  lastDiagnostics,
+} from "../ai/connection.ts";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { bodyLimit } from "hono/body-limit";
@@ -107,6 +114,9 @@ export function aiRoutes(
         const r = await complete(
           { ...s, maxTokens: Math.min(512, s.maxTokens) },
           [{ role: "user", content: "请回复 OK，用于测试接口连通性。" }],
+          undefined,
+          undefined,
+          "test",
         );
         return {
           ok: true,
@@ -119,20 +129,41 @@ export function aiRoutes(
   app.post("/models", async (c) =>
     c.json(
       await limited(async () => {
-        const s = await readSettings();
-        if (!s.apiKey)
-          throw new ApiError(
-            409,
-            "AI_NOT_CONFIGURED",
-            "请先保存接口地址和密钥",
-          );
-        const r = await providerRequest(s, "models");
-        return {
-          items: (r.data ?? []).slice(0, 300).map((m: any) => String(m.id)),
-        };
+        const body = await c.req.json();
+        const q = z
+          .object({ force: z.boolean().optional() })
+          .passthrough()
+          .parse(body);
+        const { force, ...draft } = q;
+        return discoverModels(await connectionSettings(draft), !!force);
       }),
     ),
   );
+  app.get("/diagnostics", async (c) =>
+    c.json({ result: await lastDiagnostics() }),
+  );
+  app.post("/diagnostics", async (c) =>
+    c.json(
+      await limited(async () => {
+        const body = await c.req.json();
+        const q = z
+          .object({ includeTools: z.boolean().default(false) })
+          .passthrough()
+          .parse(body);
+        const { includeTools, ...draft } = q;
+        return diagnose(await connectionSettings(draft), includeTools);
+      }),
+    ),
+  );
+  app.get("/usage", async (c) => {
+    const q = z
+      .object({
+        days: z.coerce.number().int().min(1).max(90).default(7),
+        model: z.string().max(300).default(""),
+      })
+      .parse(c.req.query());
+    return c.json(await usageReport(await readSettings(), q.days, q.model));
+  });
   app.get("/history", async (c) => c.json({ items: await history() }));
   app.post("/edit", async (c) => {
     const q = edits.safeParse(await c.req.json());

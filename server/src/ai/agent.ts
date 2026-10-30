@@ -1,3 +1,4 @@
+import { aggregateUsages } from "./usage.ts";
 import { z } from "zod";
 import { ApiError } from "../core/errors.ts";
 import { complete, parseJSON, requireAI, type Message } from "./provider.ts";
@@ -50,6 +51,7 @@ export async function chat(
   const proposals: any[] = [],
     trace: string[] = [];
   let usage: any = null;
+  const usages: unknown[] = [];
   if (settings.mode === "json")
     messages[0].content += `\n此模型使用 JSON 协议。只返回 JSON 对象：{"reply":"回复","calls":[{"name":"工具名","arguments":{}}]}。可用工具定义：${JSON.stringify(tools)}。无需调用时 calls 为空数组。调用结果会以资料消息提供，禁止自行构造 tool 角色。`;
   for (let round = 0; round < 6; round++) {
@@ -60,8 +62,10 @@ export async function chat(
       messages,
       settings.mode === "tools" ? tools : undefined,
       signal,
+      "chat",
     );
-    usage = response.usage;
+    usages.push(response.usage);
+    usage = aggregateUsages(usages);
     const m = response.message;
     let calls: { name: string; arguments: unknown; id: string }[] = [],
       reply = m.content ?? "";

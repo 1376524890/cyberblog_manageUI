@@ -1,5 +1,12 @@
 import { ApiError } from "../core/errors.ts";
 import { readSettings, validateEndpoint, type AISettings } from "./settings.ts";
+import {
+  ensureBudget,
+  recordUsage,
+  normalizeUsage,
+  standardUsage,
+  type UsageKind,
+} from "./usage.ts";
 export type Message = {
   role: string;
   content: string | null;
@@ -31,11 +38,30 @@ export async function providerRequest(
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new ApiError(
-        502,
-        "AI_PROVIDER_ERROR",
-        `模型接口返回 HTTP ${response.status}，请检查地址、密钥、模型和兼容设置`,
-      );
+      const status = response.status;
+      const code =
+        status === 401 || status === 403
+          ? "AI_AUTH_ERROR"
+          : status === 404
+            ? "AI_ENDPOINT_OR_MODEL"
+            : status === 429
+              ? "AI_PROVIDER_RATE_LIMIT"
+              : status === 400 || status === 422
+                ? "AI_PARAMETERS_UNSUPPORTED"
+                : "AI_PROVIDER_ERROR";
+      const hint =
+        status === 401 || status === 403
+          ? "密钥无效或没有访问权限"
+          : status === 404
+            ? "接口路径或模型不存在"
+            : status === 429
+              ? "服务商限流或账户额度不足"
+              : status === 400 || status === 422
+                ? "模型或请求参数不兼容，请检查温度、长度参数和工具模式"
+                : "模型服务暂时不可用";
+      throw new ApiError(502, code, `HTTP ${status}：${hint}`, {
+        httpStatus: status,
+      });
     }
     const raw = await response.text();
     if (raw.length > 2_000_000)
@@ -75,32 +101,70 @@ export async function complete(
   messages: Message[],
   tools?: unknown[],
   signal?: AbortSignal,
+  kind: UsageKind = "edit",
 ) {
-  const result = await providerRequest(
-    s,
-    "chat/completions",
-    {
-      model: s.model,
-      messages,
-      stream: false,
-      store: false,
-      ...(s.temperature === null ? {} : { temperature: s.temperature }),
-      [s.tokenParameter ?? "max_tokens"]: s.maxTokens,
-      ...(tools ? { tools, tool_choice: "auto" } : {}),
-    },
-    signal,
-  );
-  const choice = result.choices?.[0];
-  const message = choice?.message;
-  if (!message || (!message.content && !message.tool_calls?.length))
-    throw new ApiError(502, "AI_EMPTY", "模型未返回可用内容，请调整模型或请求");
-  if (choice.finish_reason === "length")
-    throw new ApiError(
-      422,
-      "AI_TRUNCATED",
-      "模型输出达到长度限制，未应用截断结果；请提高输出上限或缩短任务",
+  await ensureBudget(s);
+  const started = Date.now();
+  let rawUsage: unknown = null;
+  let ok = false;
+  let errorCode: string | null = null;
+  try {
+    const result = await providerRequest(
+      s,
+      "chat/completions",
+      {
+        model: s.model,
+        messages,
+        stream: false,
+        store: false,
+        ...(s.temperature === null ? {} : { temperature: s.temperature }),
+        [s.tokenParameter ?? "max_tokens"]: s.maxTokens,
+        ...(tools ? { tools, tool_choice: "auto" } : {}),
+      },
+      signal,
     );
-  return { message: message as Message, usage: result.usage ?? null };
+    rawUsage = result.usage ?? null;
+    const choice = result.choices?.[0];
+    const message = choice?.message;
+    if (!message || (!message.content && !message.tool_calls?.length))
+      throw new ApiError(
+        502,
+        "AI_EMPTY",
+        "模型未返回可用内容，请调整模型或请求",
+      );
+    if (choice.finish_reason === "length")
+      throw new ApiError(
+        422,
+        "AI_TRUNCATED",
+        "模型输出达到长度限制，未应用截断结果；请提高输出上限或缩短任务",
+      );
+    ok = true;
+    return {
+      message: message as Message,
+      usage: standardUsage(normalizeUsage(result.usage)),
+    };
+  } catch (e) {
+    errorCode = e instanceof ApiError ? e.code : "AI_REQUEST_FAILED";
+    if (e instanceof ApiError)
+      throw new ApiError(e.status, e.code, e.message, {
+        ...((e.details as Record<string, unknown>) ?? {}),
+        attempted: true,
+        usage: standardUsage(normalizeUsage(rawUsage)),
+      });
+    throw e;
+  } finally {
+    await recordUsage({
+      ...normalizeUsage(rawUsage),
+      model: s.model,
+      provider: new URL(s.baseUrl).origin,
+      kind,
+      ok,
+      durationMs: Date.now() - started,
+      errorCode,
+    }).catch(() => {
+      console.error("[cms:ai-usage] usage record could not be saved");
+    });
+  }
 }
 export function parseJSON(text: string) {
   const raw = text

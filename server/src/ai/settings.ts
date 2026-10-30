@@ -13,6 +13,10 @@ const text = z
   .max(500)
   .refine((v) => !/[\r\n"\\]/.test(v), "不允许换行、双引号或反斜线");
 const schema = z.object({
+  dailyTokenLimit: z.number().int().min(0).max(1_000_000_000).default(0),
+  monthlyTokenLimit: z.number().int().min(0).max(10_000_000_000).default(0),
+  usageWarnPercent: z.number().int().min(10).max(100).default(80),
+  enforceBudget: z.boolean().default(false),
   enabled: z.boolean(),
   baseUrl: text,
   model: text,
@@ -41,6 +45,10 @@ const keys = [
   "CMS_AI_TIMEOUT_SECONDS",
   "CMS_AI_SYSTEM_PROMPT",
   "CMS_AI_TOKEN_PARAMETER",
+  "CMS_AI_DAILY_TOKEN_LIMIT",
+  "CMS_AI_MONTHLY_TOKEN_LIMIT",
+  "CMS_AI_USAGE_WARN_PERCENT",
+  "CMS_AI_ENFORCE_BUDGET",
 ];
 export async function readSettings(): Promise<AISettings> {
   let env: Record<string, string | undefined> = {};
@@ -55,6 +63,10 @@ export async function readSettings(): Promise<AISettings> {
     : "";
   return {
     enabled: env.CMS_AI_ENABLED === "true",
+    dailyTokenLimit: Number(env.CMS_AI_DAILY_TOKEN_LIMIT ?? 0),
+    monthlyTokenLimit: Number(env.CMS_AI_MONTHLY_TOKEN_LIMIT ?? 0),
+    usageWarnPercent: Number(env.CMS_AI_USAGE_WARN_PERCENT ?? 80),
+    enforceBudget: env.CMS_AI_ENFORCE_BUDGET === "true",
     baseUrl: env.CMS_AI_BASE_URL ?? "https://api.openai.com/v1",
     model: env.CMS_AI_MODEL ?? "",
     apiKey: env.CMS_AI_API_KEY ?? "",
@@ -75,6 +87,10 @@ export async function readSettings(): Promise<AISettings> {
 export function publicSettings(s: AISettings) {
   return {
     enabled: s.enabled,
+    dailyTokenLimit: s.dailyTokenLimit,
+    monthlyTokenLimit: s.monthlyTokenLimit,
+    usageWarnPercent: s.usageWarnPercent,
+    enforceBudget: s.enforceBudget,
     baseUrl: s.baseUrl,
     model: s.model,
     mode: s.mode,
@@ -132,9 +148,30 @@ export async function saveSettings(input: unknown) {
     const req = parsed.data;
     const settings: AISettings = {
       ...req,
+      ...Object.fromEntries(
+        [
+          "dailyTokenLimit",
+          "monthlyTokenLimit",
+          "usageWarnPercent",
+          "enforceBudget",
+        ]
+          .filter((k) => !(k in (input as object)))
+          .map((k) => [k, old[k as keyof AISettings]]),
+      ),
       baseUrl: validateEndpoint(req.baseUrl),
       apiKey: req.clearKey ? "" : req.apiKey?.trim() || old.apiKey,
     };
+    if (
+      settings.baseUrl !== validateEndpoint(old.baseUrl) &&
+      old.apiKey &&
+      !req.apiKey?.trim() &&
+      !req.clearKey
+    )
+      throw new ApiError(
+        422,
+        "AI_KEY_REENTRY",
+        "接口地址已变更，请重新输入该服务的密钥",
+      );
     if (settings.enabled && (!settings.model || !settings.apiKey))
       throw new ApiError(
         422,
@@ -168,6 +205,10 @@ export async function saveSettings(input: unknown) {
       String(settings.timeoutSeconds),
       JSON.stringify(settings.systemPrompt),
       settings.tokenParameter,
+      String(settings.dailyTokenLimit),
+      String(settings.monthlyTokenLimit),
+      String(settings.usageWarnPercent),
+      String(settings.enforceBudget),
     ];
     const block = keys
       .map((key, i) => `${key}=${JSON.stringify(values[i])}`)

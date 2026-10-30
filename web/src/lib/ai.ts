@@ -18,6 +18,7 @@ export interface Turn {
   text: string;
   proposals?: Proposal[];
   trace?: string[];
+  usage?: any;
 }
 export const conversation = writable<Turn[]>([]);
 export async function chatRequest(
@@ -70,5 +71,10 @@ export async function chatRequest(
     reader.releaseLock();
   }
   if (!result) throw new Error("连接提前结束，请重试");
-  return result as { reply: string; proposals: Proposal[]; trace: string[] };
+  return result as {
+    reply: string;
+    proposals: Proposal[];
+    trace: string[];
+    usage?: any;
+  };
 }

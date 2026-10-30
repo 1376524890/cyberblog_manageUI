@@ -3,6 +3,7 @@
   import { api, contentSaved } from "../lib/api.ts";
   import { messageOf } from "../lib/content.ts";
   import { conversation, chatRequest, type Proposal } from "../lib/ai.ts";
+  import TokenUsage from "../components/TokenUsage.svelte";
   import ActionCard from "../components/ActionCard.svelte";
   import Icon from "../components/Icon.svelte";
   let input = "",
@@ -132,6 +133,7 @@
             number: next + i + 1,
           })),
           trace: result.trace,
+          usage: result.usage,
         },
       ]);
       await tick();
@@ -216,7 +218,9 @@
           <span class="speaker">{turn.role === "user" ? "你" : "✦"}</span>
           <div class="turn-body">
             <div class="turn-text">{turn.text}</div>
-            {#if turn.trace?.length}<details class="tool-trace">
+            <TokenUsage
+              usage={turn.usage ?? null}
+            />{#if turn.trace?.length}<details class="tool-trace">
                 <summary>已完成 {turn.trace.length} 个查询 / 准备步骤</summary
                 >{#each turn.trace as step}<div>✓ {step}</div>{/each}
               </details>{/if}{#each turn.proposals ?? [] as p}<ActionCard

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import TokenUsage from "./TokenUsage.svelte";
   import { createEventDispatcher, onDestroy } from "svelte";
   import { api } from "../lib/api.ts";
   import { messageOf, type Collection } from "../lib/content.ts";
@@ -28,6 +29,7 @@
     { value: "metadata", label: "标题 / 摘要 / 标签" },
   ];
   let generation = 0;
+  let usage: any = null;
   async function generate() {
     if (busy) return;
     busy = true;
@@ -39,12 +41,14 @@
     resultMode = mode;
     const id = ++generation;
     try {
-      const r = await api.post<{ text?: string; metadata?: typeof metadata }>(
-        "/ai/edit",
-        { mode, instruction, body, title, collection },
-      );
+      const r = await api.post<{
+        text?: string;
+        metadata?: { title: string; description: string; tags: string[] };
+        usage?: any;
+      }>("/ai/edit", { mode, instruction, body, title, collection });
       if (id !== generation) return;
       result = r.text ?? "";
+      usage = r.usage ?? null;
       metadata = r.metadata ?? null;
     } catch (e) {
       error = messageOf(e);
@@ -108,7 +112,9 @@
           >{busy ? "正在生成…" : "生成建议 ✦"}</button
         >
       </div>
-      {#if error}<div class="err" role="status">{error}</div>{/if}
+      <TokenUsage {usage} />{#if error}<div class="err" role="status">
+          {error}
+        </div>{/if}
       {#if result || metadata}<div class="ai-result">
           <div class="section-heading">
             <strong>建议预览</strong><span>当前文件尚未改动</span>
