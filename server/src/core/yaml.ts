@@ -13,6 +13,7 @@ const FIELD_ORDER: Record<CollectionName, string[]> = {
 		"title",
 		"published",
 		"updated",
+		"draft",
 		"description",
 		"image",
 		"tags",
@@ -102,6 +103,13 @@ export function stringifyFrontmatter(
 			emit(key, data[key]);
 			used.add(key);
 		}
+	}
+	// 防御：schema 内存在但未列入 FIELD_ORDER 的键自动追加（保持原对象顺序），
+	// 避免字段清单遗漏导致静默丢字段
+	for (const [key, value] of Object.entries(data)) {
+		if (used.has(key)) continue;
+		emit(key, value);
+		used.add(key);
 	}
 	for (const [key, value] of Object.entries(extra)) {
 		if (used.has(key)) continue;
