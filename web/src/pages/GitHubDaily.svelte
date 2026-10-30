@@ -12,6 +12,7 @@
     slug?: string;
     attempts: number;
     model?: string;
+    quality?: { passed: boolean; figures: number; workflowVersion: string };
     ranking?: { name: string; rank: number; todayStars: number | null }[];
   };
   type Status = {
@@ -21,6 +22,7 @@
     schedule: string;
     nextRunAt: string | null;
     source: string;
+    workflow?: { version: string; steps: string[] };
     diagramEngine: string;
     runs: Run[];
   };
@@ -114,6 +116,17 @@
       >
     </div>
   </section>
+  {#if state.workflow}<section class="panel daily-card workflow-panel">
+      <h2>每天按这套流程执行</h2>
+      <ol class="workflow-steps">
+        {#each state.workflow.steps as step, i}<li>
+            <span>{i + 1}</span>{step}
+          </li>{/each}
+      </ol>
+      <p class="muted">
+        手动生成与定时任务共用同一流程，图文检查通过后保存为草稿。
+      </p>
+    </section>{/if}
   <div class="daily-grid">
     <section class="panel daily-card">
       <h2>榜单与证据</h2>
@@ -158,6 +171,9 @@
             >{/if}
         </div>
         <p>{run.progress}</p>
+        {#if run.quality?.passed}<p class="quality-result">
+            ✓ 核心链路和图文检查通过 · {run.quality.figures} 张 PNG
+          </p>{/if}
         {#if run.error}<p class="err">{run.error}</p>{/if}
         <p class="muted">
           开始 {time(run.startedAt)} · 结束 {time(run.finishedAt)} · 第 {run.attempts}
@@ -179,6 +195,36 @@
 {:else}<p class="muted">正在读取服务器任务状态…</p>{/if}
 
 <style>
+  .workflow-panel {
+    margin-top: 20px;
+  }
+  .workflow-steps {
+    list-style: none;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 0;
+    margin: 18px 0;
+  }
+  .workflow-steps li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .workflow-steps span {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(110, 105, 235, 0.15);
+    color: #a7a3ff;
+  }
+  .quality-result {
+    color: #73bba7;
+    font-size: 13px;
+  }
   .daily-head,
   .daily-hero,
   .daily-run-title {

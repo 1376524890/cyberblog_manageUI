@@ -8,6 +8,23 @@ export interface RankedRepo {
 export interface Evidence extends RankedRepo {
   sha: string;
   evidenceVersion?: number;
+  treeComplete?: boolean;
+  corePlan?: {
+    focus: string;
+    mainFlow: string[];
+    files: { path: string; role: string; why: string }[];
+  };
+  semanticReview?: {
+    passed: boolean;
+    checks: {
+      coreFlow: boolean;
+      usefulDetail: boolean;
+      grounded: boolean;
+      blogVoice: boolean;
+      issues: string[];
+    };
+    reviewedAt: string;
+  };
   codeSampled: boolean;
   description: string;
   stars: number;
@@ -305,4 +322,29 @@ export async function readPublicRepoFile(source: Evidence, file: string) {
   if (!text || text.includes("\0"))
     throw new ApiError(502, "DAILY_EVIDENCE", "源码页面未提供可读取文本");
   return { path: file, text: text.slice(0, 18000), url };
+}
+
+export async function completeSourceTree(source: Evidence): Promise<Evidence> {
+  if (source.treeComplete) return source;
+  const tree = await api(
+    `/repos/${source.name}/git/trees/${source.sha}?recursive=1`,
+  );
+  const paths = (tree.tree ?? [])
+    .filter(
+      (f: any) =>
+        f.type === "blob" &&
+        /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|c|cpp|h|svelte|vue|md|json|toml)$/.test(
+          f.path,
+        ) &&
+        !/(^|\/)(node_modules|vendor|dist|build|fixtures)\//.test(f.path),
+    )
+    .map((f: any) => String(f.path));
+  return {
+    ...source,
+    treeComplete: true,
+    tree: [
+      ...new Set([...source.files.map((f) => f.path), ...paths.slice(0, 2400)]),
+    ],
+    truncated: !!tree.truncated || paths.length > 2400,
+  };
 }

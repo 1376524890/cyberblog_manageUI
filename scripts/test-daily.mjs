@@ -1,3 +1,4 @@
+import { assertCoreDiagram } from "../server/src/ai/research.ts";
 import sharp from "../server/node_modules/sharp/lib/index.js";
 import { renderArchitecturePNG } from "../server/src/ai/architecture.ts";
 import assert from "node:assert/strict";
@@ -53,6 +54,26 @@ let now = new Date("2026-10-30T00:00:00Z"),
 const makeEvidence = (repo) => ({
   ...repo,
   sha: "a".repeat(40),
+  treeComplete: true,
+  corePlan: {
+    focus: "fixture workflow",
+    mainFlow: ["entry", "process"],
+    files: [
+      { path: "src/main.ts", role: "入口", why: "接收任务" },
+      { path: "src/lib.ts", role: "处理", why: "执行任务" },
+    ],
+  },
+  semanticReview: {
+    passed: true,
+    checks: {
+      coreFlow: true,
+      usefulDetail: true,
+      grounded: true,
+      blogVoice: true,
+      issues: [],
+    },
+    reviewedAt: new Date().toISOString(),
+  },
   description: "测试",
   language: "TypeScript",
   stars: 100,
@@ -92,6 +113,19 @@ const makeAnalysis = () => ({
   edges: [{ from: 0, to: 1, label: "调用", evidence: "src/main.ts" }],
 });
 const ev = makeEvidence(ranking[0]);
+const planSource = makeEvidence(ranking[0]);
+planSource.corePlan.files.push({
+  path: "src/storage.ts",
+  role: "存储",
+  why: "持久化结果",
+});
+assert.throws(() => assertCoreDiagram(planSource, makeAnalysis()));
+checks++;
+const disconnected = makeAnalysis();
+disconnected.edges = [];
+assert.throws(() => assertCoreDiagram(makeEvidence(ranking[0]), disconnected));
+checks++;
+
 assert.throws(() =>
   validateAnalysis(
     {
@@ -285,8 +319,14 @@ check(
   (await restored.status()).runs[0].state === "done",
 );
 await restored.configure(true);
-restored.setWriter(async () => {
+restored.setWriter(async (draft) => {
   saved++;
+  const response = await fetch(base + "/posts", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...draft, commit: true }),
+  });
+  assert.equal(response.status, 201);
 });
 await restored.tick();
 await restored.wait();
@@ -299,6 +339,18 @@ now = new Date("2026-10-31T00:00:00Z");
 await restored.tick();
 await restored.wait();
 check("Runs next day at 08:00", saved === 2);
+const scheduled = await fetch(base + "/posts/github-daily-2026-10-31", {
+  headers,
+}).then((r) => r.json());
+check(
+  "Scheduled run saves a real illustrated draft through the same API",
+  scheduled.data.draft === true &&
+    (scheduled.body.match(/!\[/g) ?? []).length === 5,
+);
+check(
+  "Scheduled draft passed automatic quality gates",
+  (await restored.status()).runs[0].quality?.passed === true,
+);
 const failureDir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-failed-"),
 );
