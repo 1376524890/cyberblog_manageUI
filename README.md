@@ -59,6 +59,7 @@ pnpm build && pnpm acceptance
 ```bash
 pnpm typecheck
 pnpm build
+server/node_modules/.bin/tsx scripts/test-yaml.mjs
 pnpm fixtures
 pnpm acceptance
 CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_modules/.bin/tsx scripts/regression.mjs

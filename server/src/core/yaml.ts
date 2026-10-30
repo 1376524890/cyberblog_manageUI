@@ -97,6 +97,15 @@ export function stringifyFrontmatter(
 			}
 			return;
 		}
+		// Astro uses z.date(): known date fields must be YAML timestamps,
+		// while date-looking titles, tags and unknown fields remain strings.
+		const isDateField =
+			(collection !== "spec" && key === "published") ||
+			(collection === "posts" && key === "updated");
+		if (isDateField && typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+			lines.push(`${key}: ${value}`);
+			return;
+		}
 		lines.push(`${key}: ${scalar(value)}`);
 	};
 	for (const key of order) {
