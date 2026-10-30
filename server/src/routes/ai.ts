@@ -1,3 +1,4 @@
+import { daily } from "../ai/daily.ts";
 import { usageReport } from "../ai/usage.ts";
 import {
   connectionSettings,
@@ -163,6 +164,19 @@ export function aiRoutes(
       })
       .parse(c.req.query());
     return c.json(await usageReport(await readSettings(), q.days, q.model));
+  });
+  app.get("/daily", async (c) => c.json(await daily.status()));
+  app.put("/daily", async (c) => {
+    const q = z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .parse(await c.req.json());
+    if (q.enabled) await requireAI();
+    return c.json(await daily.configure(q.enabled));
+  });
+  app.post("/daily/run", async (c) => {
+    await requireAI();
+    return c.json(await daily.start(), 202);
   });
   app.get("/history", async (c) => c.json({ items: await history() }));
   app.post("/edit", async (c) => {

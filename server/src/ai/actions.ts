@@ -333,6 +333,10 @@ export async function readTool(name: string, args: unknown) {
       truncated: p.body.length > 50000,
     };
   }
+  if (name === "get_github_daily_status")
+    return (await import("./daily.ts")).daily.status();
+  if (name === "start_github_daily")
+    return (await import("./daily.ts")).daily.start();
   if (name === "get_site_status") return status();
   if (name === "get_templates") return templates;
   throw new ApiError(422, "AI_UNKNOWN_TOOL", "不支持的 AI 操作");
@@ -374,6 +378,12 @@ export const tools = [
     ["collection", "slug"],
   ),
   fn("get_site_status", "读取仓库分支和待发布状态", {}),
+  fn("get_github_daily_status", "读取 GitHub 每日日报计划、进度与草稿链接", {}),
+  fn(
+    "start_github_daily",
+    "仅在用户明确要求生成或重试今日 GitHub Top 5 日报时调用。后台生成，只创建草稿，不发布，无法修改计划或其他内容。返回 started 不代表完成，请查询进度。",
+    {},
+  ),
   fn("get_templates", "读取可用 Markdown 模板", {}),
   fn(
     "propose_change",

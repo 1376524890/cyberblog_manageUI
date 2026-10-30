@@ -1,3 +1,8 @@
+import { daily } from "./ai/daily.ts";
+import { createSession } from "./core/auth.ts";
+import { propose, apply } from "./ai/actions.ts";
+import { getOne } from "./core/content-store.ts";
+import { ApiError } from "./core/errors.ts";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import fs from "node:fs";
@@ -145,3 +150,46 @@ serve(
     console.log(`[cms] 管理仓库: ${config.repoPath}`);
   },
 );
+
+// Delegated automation is deliberately restricted to a single daily draft create.
+// It reuses Agent proposals and the authenticated, serialized content API.
+daily.setWriter(async (draft) => {
+  try {
+    await getOne("posts", draft.slug);
+    return { existing: true };
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 404) throw e;
+  }
+  const p = await propose({
+    operation: "create",
+    collection: "posts",
+    ...draft,
+    reason: "管理员授权的 GitHub 每日 Top 5 草稿任务",
+  });
+  const token = createSession().token;
+  return apply(p.id, async (method, url, body) => {
+    if (method !== "POST" || url !== "/posts")
+      throw new Error("Draft creation only");
+    const response = await app.request(`http://localhost/api/v1${url}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, data: await response.json() };
+  });
+});
+if (process.env.CMS_DAILY_SCHEDULER !== "off") {
+  const tick = () => {
+    void daily
+      .tick()
+      .catch(() =>
+        console.error("[cms:daily] scheduler failed; inspect daily status"),
+      );
+  };
+  const timer = setInterval(tick, 30000);
+  timer.unref();
+  tick();
+}

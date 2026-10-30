@@ -78,3 +78,22 @@ CMS_REPO_PATH="$PWD/test-fixtures/blog" PORT=18789 HOST=127.0.0.1 server/node_mo
 本轮增加成员交互设置、九类 Markdown 模板、AI 编辑助手、对话操作卡片与 AI 设置。首次使用在「AI 设置」填写模型服务信息；密钥安全保存在服务器 `server/.env`，默认关闭 AI，源码不附带真实密钥。详细使用、配置、操作边界和验证方式见 [AI 工作台文档](docs/ai-studio.md)。
 
 AI 设置现支持自动模型 ID 获取、分阶段连接诊断、每日/月度 token 额度；「Token 用量」可查看趋势、模型分组和调用明细。监控数据从此功能上线后开始记录，未返回 usage 的请求会标记为未上报。
+
+
+## GitHub 每日热门 Top 5 草稿
+
+管理界面 `#/github-daily`：启停计划、立即生成/重试、查看进度与历史、跳转草稿。每天北京时间 08:00 开始；服务端每 30 秒检查计划，关闭浏览器不影响。服务停机后恢复时补跑当天已过 08:00 的任务，不补历史日期。状态和源码快照存放在 AI `.env` 同目录 `.runtime/github-daily/`，不进入 Git。此目录需要随服务器备份保留。
+
+榜单严格采用 GitHub Trending `since=daily` 页面抓取时前五名，保留排序和快照时间；页面解析失败不替换为总星标榜。GitHub 公开 REST API 获取固定提交、目录树、README、项目清单及最多两份关键源码样本，不克隆或执行第三方代码。无认证 API 可能限流；失败会显示在任务记录中，不会编造替代资料。每份源码样本有长度限制；结构图只是样本推导，不是完整运行时调用图。
+
+沿用当前 AI 设置的 OpenAI 兼容模型、预算与用量记录（分类 GitHub 日报），每个仓库独立分析，保留成功分析供重试复用。模型输出通过结构、路径、源码证据及链接校验后组装正文与五张 Mermaid 图。博客已有 Mermaid 服务端渲染，无需依赖第三方绘图站点；Archify 是 Agent 图表技能，本实现没有虚构其托管生成 API。
+
+计划是管理员对每日固定范围创建草稿的明确委托。生成器强制 `draft:true`，仅调用原 Agent 的 `propose(create)` / `apply`，由认证内容 API 串行提交；绝不调用 publish，不设置文章密码，不修改现有文章。每日固定 slug `github-daily-YYYY-MM-DD`，既有同名内容保留，不覆盖人工编辑。成功每日最多一次；失败间隔至少 10 分钟，自动尝试总计最多 3 次，管理员仍可手动重试。`get_github_daily_status` / `start_github_daily` 允许在 AI 工作台查询或明确指令触发今日任务，模型不能更改日程。
+
+测试（必须使用隔离夹具）：
+
+```bash
+CMS_DAILY_SCHEDULER=off CMS_REPO_PATH="$PWD/test-fixtures/blog" CMS_AI_ENV_FILE="$PWD/test-fixtures/daily-test.env" CMS_ADMIN_PASSWORD=admin123 HOST=127.0.0.1 PORT=18793 server/node_modules/.bin/tsx scripts/test-daily.mjs
+```
+
+运行验收时可用 `CMS_DAILY_SCHEDULER=off` 关闭调度轮询。生产服务使用 systemd `cyber-cms` 的启动/重启保证进程存活；首次部署后需在页面开启计划。日期按 Asia/Shanghai 计算，不依赖服务器本地时区。

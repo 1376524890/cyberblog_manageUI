@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "../core/errors.ts";
 import { settingsPath, type AISettings } from "./settings.ts";
-export type UsageKind = "chat" | "edit" | "test";
+export type UsageKind = "chat" | "edit" | "test" | "daily";
 export interface Tokens {
   input: number | null;
   output: number | null;

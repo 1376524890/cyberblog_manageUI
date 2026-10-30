@@ -353,9 +353,11 @@
               ><td
                 >{r.kind === "chat"
                   ? "对话"
-                  : r.kind === "test"
-                    ? "连接测试"
-                    : "编辑助手"}</td
+                  : r.kind === "daily"
+                    ? "GitHub 日报"
+                    : r.kind === "test"
+                      ? "连接测试"
+                      : "编辑助手"}</td
               ><td
                 ><span
                   class="badge"

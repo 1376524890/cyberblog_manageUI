@@ -16,6 +16,7 @@
   import SeriesPage from "./pages/SeriesPage.svelte";
   import PublishPage from "./pages/PublishPage.svelte";
   import AIWorkspace from "./pages/AIWorkspace.svelte";
+  import GitHubDaily from "./pages/GitHubDaily.svelte";
   import AIUsage from "./pages/AIUsage.svelte";
   import AISettings from "./pages/AISettings.svelte";
   import "./style.css";
@@ -30,19 +31,21 @@
     Object.keys(collections).includes(section) ? section : "posts"
   ) as Collection;
   $: pageTitle =
-    section === "ai"
-      ? "AI 工作台"
-      : section === "ai-usage"
-        ? "Token 用量"
-        : section === "ai-settings"
-          ? "AI 设置"
-          : section === "overview"
-            ? "工作台"
-            : section === "series"
-              ? "系列管理"
-              : section === "publish"
-                ? "发布中心"
-                : collections[collection].label;
+    section === "github-daily"
+      ? "GitHub 日报"
+      : section === "ai"
+        ? "AI 工作台"
+        : section === "ai-usage"
+          ? "Token 用量"
+          : section === "ai-settings"
+            ? "AI 设置"
+            : section === "overview"
+              ? "工作台"
+              : section === "series"
+                ? "系列管理"
+                : section === "publish"
+                  ? "发布中心"
+                  : collections[collection].label;
   async function refresh() {
     if (!authed) return;
     try {
@@ -129,6 +132,9 @@
           ><Icon name="series" />系列管理</a
         >
         <div class="nav-label">站点与助手</div>
+        <a class:active={section === "github-daily"} href="#/github-daily"
+          ><Icon name="activity" />GitHub 日报</a
+        >
         <a class:active={section === "ai-usage"} href="#/ai-usage"
           ><Icon name="activity" />Token 用量</a
         >
@@ -183,7 +189,8 @@
       <main>
         {#if notice}<div class="err" role="alert">{notice}</div>{/if}
         {#key route}
-          {#if section === "ai"}<AIWorkspace />
+          {#if section === "github-daily"}<GitHubDaily />
+          {:else if section === "ai"}<AIWorkspace />
           {:else if section === "ai-usage"}<AIUsage
             />{:else if section === "ai-settings"}<AISettings />
           {:else if section === "overview"}<Overview />
