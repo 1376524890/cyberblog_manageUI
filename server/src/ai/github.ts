@@ -175,7 +175,12 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     stars: meta.stargazers_count,
     language: meta.language ?? "未标注",
     license: meta.license?.spdx_id ?? "未标注",
-    tree: [...new Set([...files.map(f => f.path), ...blobs.slice(0, 400).map((f: any) => String(f.path))])],
+    tree: [
+      ...new Set([
+        ...files.map((f) => f.path),
+        ...blobs.slice(0, 400).map((f: any) => String(f.path)),
+      ]),
+    ],
     truncated: !!tree.truncated || blobs.length > 400,
     files,
   };
