@@ -33,11 +33,9 @@ export const authRoutes = new Hono()
 	.post("/logout", (c) => {
 		deleteCookieHeader(c);
 		return c.json({ ok: true });
-	})
-	.get("/me", (c) => {
-		// authMiddleware 已保证只有有效会话到达此处
-		return c.json({ role: "admin", expiresAt: null });
 	});
+// 注意：GET /auth/me 挂载在 index.ts 的 authMiddleware 之后（受保护），
+// 不能定义在这里 —— Hono 子应用注册早于中间件会绕过认证
 
 function setCookieHeader(c: any, token: string) {
 	const parts = [

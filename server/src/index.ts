@@ -27,9 +27,12 @@ app.use("*", async (c, next) => {
 
 const v1 = new Hono();
 
-// 认证（login 除外）
+// 认证（login/logout 不需要认证）
 v1.route("/auth", authRoutes);
+// 认证中间件：之后注册的全部路由受保护
 v1.use("*", authMiddleware());
+// /me 必须在 authMiddleware 之后注册（受保护）
+v1.get("/auth/me", (c) => c.json({ role: "admin", expiresAt: null }));
 v1.route("/posts", collectionRoutes("posts"));
 v1.route("/dynamic", collectionRoutes("dynamic"));
 v1.route("/projects", collectionRoutes("projects"));

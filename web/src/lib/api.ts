@@ -32,6 +32,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const json = text ? (JSON.parse(text) as unknown) : {};
 	if (!res.ok) {
 		const err = (json as ApiErrorBody).error;
+		// 会话过期/未认证：跳回登录页（避免停留在空白主界面）
+		if (res.status === 401 && !path.startsWith("/auth/")) {
+			location.hash = "/";
+			location.reload();
+			throw new ApiClientError(401, "UNAUTHORIZED", "登录已过期，请重新登录");
+		}
 		throw new ApiClientError(
 			res.status,
 			err?.code ?? "UNKNOWN",
