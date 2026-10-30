@@ -72,22 +72,21 @@ function validateBlogProse(prose: string, allowed: Set<string>) {
 }
 export function validateAnalysis(raw: unknown, source: Evidence): Analysis {
   const a = analysisSchema.parse(raw);
-  const paths = new Set(source.tree),
-    read = new Set(source.files.map((f) => f.path));
-  if (
-    a.nodes.some((n) => !paths.has(n.path)) ||
-    a.edges.some(
-      (e) =>
-        e.from >= a.nodes.length ||
-        e.to >= a.nodes.length ||
-        !read.has(e.evidence),
-    )
-  )
-    throw new ApiError(
-      422,
-      "DAILY_EVIDENCE",
-      "架构图引用了无效节点或文件，请使用所提供的实际模块",
-    );
+  const paths = new Set(source.tree), read = new Set(source.files.map(f=>f.path));
+  const resolve = (value:string, allowed:Set<string>) => {
+    const link=source.files.find(f=>f.url===value.split("#")[0]);
+    if(link && allowed.has(link.path)) return link.path;
+    const requested=value.trim().replace(/^`|`$/g,"").replace(/^\.\//,"").replace(/#L\d+(?:-L\d+)?$/,"");
+    if(requested.split("/").includes("..")) return value;
+    if(allowed.has(requested)) return requested;
+    const matches=[...allowed].filter(p=>p.endsWith("/"+requested)||requested.endsWith("/"+p));
+    return matches.length===1?matches[0]:value;
+  };
+  a.nodes.forEach(n=>n.path=resolve(n.path,paths));
+  a.edges.forEach(e=>e.evidence=resolve(e.evidence,read));
+  const invalidPaths=a.nodes.filter(n=>!paths.has(n.path)).map(n=>n.path);
+  const invalidEvidence=a.edges.filter(e=>!read.has(e.evidence)).map(e=>e.evidence);
+  if(invalidPaths.length || invalidEvidence.length || a.edges.some(e=>e.from>=a.nodes.length||e.to>=a.nodes.length)) throw new ApiError(422,"DAILY_EVIDENCE",`请修正架构图：无效节点路径 ${invalidPaths.join(",")||"无"}；无效连线证据 ${invalidEvidence.join(",")||"无"}。节点编号必须0至${a.nodes.length-1}。优先使用这些已读取文件：${[...read].join(",")}；没有依据的连线直接省略。`);
   const prose = a.paragraphs.join("\n\n");
   if (prose.length < 750)
     throw new ApiError(
