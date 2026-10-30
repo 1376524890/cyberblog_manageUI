@@ -48,6 +48,7 @@
     seriesOrder: number | undefined = undefined,
     draft = true,
     pinned = false,
+    passwordProtected = false,
     password = "",
     passwordHint = "",
     image = "",
@@ -126,6 +127,7 @@
     seriesOrder,
     draft,
     pinned,
+    passwordProtected,
     password,
     passwordHint,
     image,
@@ -199,8 +201,8 @@
       seriesOrder: seriesOrder ?? null,
       draft,
       pinned,
-      password,
-      passwordHint,
+      password: passwordProtected ? password : "",
+      passwordHint: passwordProtected ? passwordHint : "",
       image,
       author,
       lang,
@@ -239,6 +241,7 @@
         draft = Boolean(d.draft);
         pinned = Boolean(d.pinned);
         password = String(d.password ?? "");
+        passwordProtected = password.length > 0;
         passwordHint = String(d.passwordHint ?? "");
         image = String(d.image ?? "");
         author = String(d.author ?? "");
@@ -287,6 +290,8 @@
         throw new Error("请填写发布日期");
       if (collection !== "dynamic" && collection !== "spec" && !title.trim())
         throw new Error("请填写标题");
+      if (collection === "posts" && passwordProtected && !password.trim())
+        throw new Error("启用密码保护后，请填写文章访问密码");
       const payload = data();
       if (isNew) {
         let target = filename.trim();
@@ -687,15 +692,18 @@ body{font:14px/1.9 system-ui;color:#334155;padding:20px;overflow-wrap:anywhere}i
                 >许可证链接<input bind:value={licenseUrl} /></label
               ><label class="check-field"
                 ><input type="checkbox" bind:checked={comment} />允许评论</label
-              ><label class="form-field"
-                >访问密码（清空即公开）<input
-                  type="password"
-                  autocomplete="off"
-                  bind:value={password}
-                /></label
-              ><label class="form-field"
-                >密码提示<input bind:value={passwordHint} /></label
               >
+              <label class="check-field"><input type="checkbox" bind:checked={passwordProtected} />启用文章密码保护</label>
+              <p class="hint">{passwordProtected ? "本文需要访问密码，与管理界面登录密码独立。" : "公开访问：文章无需密码，默认不启用保护。"}</p>
+              {#if passwordProtected}
+                <label class="form-field">文章访问密码<input
+                  type="password"
+                  name="article-access-password"
+                  autocomplete="new-password"
+                  bind:value={password}
+                /></label>
+                <label class="form-field">密码提示<input name="article-password-hint" autocomplete="off" bind:value={passwordHint} /></label>
+              {/if}
             </div>
           </details>
         </section>{/if}
