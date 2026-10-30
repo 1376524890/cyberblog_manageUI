@@ -53,6 +53,14 @@ export const analysisSchema = z.object({
 export type Analysis = z.infer<typeof analysisSchema>;
 const reportVoice =
   /(?:本次|本轮|本文).{0,12}(?:抽样|审计|核对|复核|大模型|由AI)|未(?:运行|执行|验证|进行完整审计)|仅(?:供参考|基于样本)|待(?:人工审核|复核)|不能(?:代表整体|代替完整)|边界(?:说明|划定)|(?:本次读取的源码|阅读与复核说明|基于样本推断)/;
+const canonicalURL=(value:string)=>{try{return new URL(value.replace(/[.,;!?]+$/,"").replace(/#L\d+(?:-L\d+)?$/,"" )).href;}catch{return value;}};
+function sourceURLs(source:Evidence) {
+  const urls=new Set<string>([`https://github.com/${source.name}`,...source.files.map(f=>f.url),...source.tree.map(file=>`https://github.com/${source.name}/blob/${source.sha}/${file.split("/").map(encodeURIComponent).join("/")}`)]);
+  for(const file of source.files) for(const [value] of file.text.matchAll(/https?:\/\/[^\s<>"'`\)\]\}]+/g)) {
+    try{const u=new URL(value);if(["https:","http:"].includes(u.protocol)&&!u.username&&!u.password&&!/^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[::1\])/.test(u.hostname))urls.add(u.href);}catch{}
+  }
+  return new Set([...urls].map(canonicalURL));
+}
 function validateBlogProse(prose: string, allowed: Set<string>) {
   if (/<\/?(?:script|iframe|object|embed|svg|math|style|img|link|meta|form|input|video|audio|base)\b/i.test(prose)) throw new ApiError(422,"DAILY_FORMAT","正文不要包含可执行或嵌入式HTML标签");
   const proseOutsideCode = prose.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
@@ -64,8 +72,8 @@ function validateBlogProse(prose: string, allowed: Set<string>) {
       "DAILY_BLOG_VOICE",
       "请删除报告口吻与生成过程说明，改成介绍项目的自然博客段落",
     );
-  for (const url of prose.match(/https?:\/\/[^\s)<>\]"，。；]+/g) ?? [])
-    if (!allowed.has(url.replace(/#L\d+(?:-L\d+)?$/, "")))
+  for (const url of proseOutsideCode.match(/https?:\/\/[^\s)<>\]"，。；]+/g) ?? [])
+    if (!allowed.has(canonicalURL(url)))
       throw new ApiError(
         422,
         "DAILY_SOURCE_LINK",
@@ -96,13 +104,7 @@ export function validateAnalysis(raw: unknown, source: Evidence): Analysis {
       "DAILY_BLOG_DETAIL",
       "项目介绍过短，请补充功能、使用例子和模块协作的具体内容",
     );
-  validateBlogProse(
-    prose,
-    new Set([
-      `https://github.com/${source.name}`,
-      ...source.files.map((f) => f.url),
-    ]),
-  );
+  validateBlogProse(prose,sourceURLs(source));
   return a;
 }
 interface Edition {
@@ -467,7 +469,7 @@ export async function generateOverview(
       closing: z.string().min(50).max(900),
     })
     .parse(parseJSON(result.message.content ?? ""));
-  validateBlogProse(edition.lead + "\n" + edition.closing, new Set());
+  validateBlogProse(edition.lead + "\n" + edition.closing, new Set(projects.map(p=>canonicalURL(`https://github.com/${p.name}`))));
   return edition;
 }
 export const daily = new DailyService();
