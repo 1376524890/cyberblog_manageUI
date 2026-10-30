@@ -53,8 +53,9 @@ export type Analysis = z.infer<typeof analysisSchema>;
 const reportVoice =
   /(?:本次|本轮|本文).{0,12}(?:抽样|审计|核对|复核|大模型|由AI)|未(?:运行|执行|验证|进行完整审计)|仅(?:供参考|基于样本)|待(?:人工审核|复核)|不能(?:代表整体|代替完整)|边界(?:说明|划定)|(?:本次读取的源码|阅读与复核说明|基于样本推断)/;
 function validateBlogProse(prose: string, allowed: Set<string>) {
-  if (/<\/?[a-z][^>]*>|!\[|```|(?:javascript|data):/i.test(prose))
-    throw new ApiError(422, "DAILY_FORMAT", "博客正文含不符合约定的内容");
+  const proseOutsideCode = prose.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
+  if (/<\/?[a-z][^>]*>/i.test(proseOutsideCode)) throw new ApiError(422,"DAILY_FORMAT","正文不应包含原始HTML标签；代码类型请放入行内代码");
+  if (/!\[/.test(proseOutsideCode) || /```(?:mermaid|svg|html)\b/i.test(prose) || /\]\(\s*(?:javascript|data):/i.test(proseOutsideCode)) throw new ApiError(422,"DAILY_FORMAT","正文不应含自造图片、嵌入式图表或不安全的链接");
   if (reportVoice.test(prose))
     throw new ApiError(
       422,
