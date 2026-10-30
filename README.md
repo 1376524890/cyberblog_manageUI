@@ -86,7 +86,7 @@ AI 设置现支持自动模型 ID 获取、分阶段连接诊断、每日/月度
 
 专用写作配置 `DAILY_WRITING_BRIEF` 位于 `server/src/ai/daily.ts`，要求把每个项目写成 6–8 个详细、自然的博客段落，介绍用途、实际场景、使用方法与核心实现。不把采集过程、样本说明或审计免责声明写进文章。DeepSeek Flash / v4-pro 的日报调用关闭默认扩展思考，避免正文额度被耗尽；普通对话参数保持原样。正文只围绕项目展开，开篇与收尾另由模型统一撰写。模型用量（包括格式修正）沿用 AI 设置与预算，并记入“GitHub 日报”。
 
-GitHub Trending daily 前五名保持原排序；公开 REST API 获取固定提交的 README、清单和 5 份关键源码，重跑可从旧快照补读模块并缓存。内部快照和执行信息放在 `.env` 同目录 `.runtime/github-daily/`，不混入正文。源码不会被执行。公开 API 限流会在任务页显示。
+GitHub Trending daily 前五名保持原排序；公开 REST API 获取固定提交的 README、清单和 5 份关键源码，重跑可从旧快照补读模块并缓存。模型绘图需要其他已知模块时，读取固定提交的 GitHub 官方源码页，再让模型结合新代码完善正文和结构图；最多补读两轮，不执行网页或仓库代码。内部快照和执行信息放在 `.env` 同目录 `.runtime/github-daily/`，不混入正文。源码不会被执行。公开 API 限流会在任务页显示。
 
 架构图使用自主实现的分层卡片、模块职责和正交连线布局，参考 Archify 的图形表达，直接由 sharp 导出 1800 像素宽的 PNG。图中中文使用开源 Noto CJK 字体，首次从 Noto 官方 GitHub 仓库下载并缓存在 runtime/fonts，也可用 `CMS_DIAGRAM_FONT` 指定已有字体。PNG 以普通 Markdown 图片插入正文，博客无需 Mermaid 或外部图片服务。
 

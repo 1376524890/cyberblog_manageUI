@@ -256,3 +256,25 @@ export async function enrichEvidence(previous: Evidence): Promise<Evidence> {
     tree: [...new Set([...previous.tree, ...files.map((f) => f.path)])],
   };
 }
+
+export function sourceLinesFromGitHubHTML(html: string): string | null {
+  for (const match of html.matchAll(/<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/g)) {
+    let root: unknown; try { root=JSON.parse(match[1]); } catch { continue; }
+    const queue: unknown[]=[root]; let visited=0;
+    while(queue.length && visited++<50000) {
+      const item:any=queue.pop(); if(!item||typeof item!=="object")continue;
+      if(Array.isArray(item.rawLines)&&item.rawLines.every((line:unknown)=>typeof line==="string"))return item.rawLines.join("\n");
+      for (const value of Object.values(item)) if(queue.length<50000)queue.push(value);
+    }
+  }
+  return null;
+}
+export async function readPublicRepoFile(source: Evidence, file: string) {
+  if(!source.tree.includes(file)||file.split("/").some(p=>p===".."||p===".")||! /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|cpp|h|c|svelte|vue|json|toml|md)$/i.test(file))throw new ApiError(422,"DAILY_EVIDENCE","不能读取资料目录之外的代码路径");
+  const encoded=file.split("/").map(encodeURIComponent).join("/");
+  const url=`https://github.com/${source.name}/blob/${source.sha}/${encoded}`;
+  let text=sourceLinesFromGitHubHTML(await download(url));
+  if(text===null)text=await download(`https://api.github.com/repos/${source.name}/contents/${encoded}?ref=${source.sha}`,{Accept:"application/vnd.github.raw+json"});
+  if(!text || text.includes("\0"))throw new ApiError(502,"DAILY_EVIDENCE","源码页面未提供可读取文本");
+  return {path:file,text:text.slice(0,18000),url};
+}
