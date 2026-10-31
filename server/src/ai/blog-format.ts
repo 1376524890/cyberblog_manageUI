@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "reviewed-unique-blog-png-v5",
+  version: "typed-research-resumable-png-v6",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [

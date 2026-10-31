@@ -10,6 +10,7 @@ export interface Evidence extends RankedRepo {
   sha: string;
   repositoryId?: number;
   evidenceVersion?: number;
+  researchVersion?: number;
   treeComplete?: boolean;
   corePlan?: {
     focus: string;
@@ -174,25 +175,23 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
       `${repo.name} 未找到可读取的源码或文档，停止生成`,
     );
   const files: Evidence["files"] = [];
+  const readableTree = blobs.map((f: any) => String(f.path));
   for (const f of picked) {
-    if (!/^[a-f0-9]{40}$/.test(f.sha)) continue;
-    const blob = await api(`${base}/git/blobs/${f.sha}`);
-    if (blob.encoding !== "base64") continue;
-    const text = Buffer.from(blob.content, "base64")
-      .toString("utf8")
-      .slice(0, f === readme ? 6500 : 6000);
-    if (text.includes("\0")) continue;
+    const file = await readPublicRepoFile(
+      { name: repo.name, sha, tree: readableTree } as Evidence,
+      f.path,
+    );
     files.push({
-      path: f.path,
-      text,
-      url: `https://github.com/${repo.name}/blob/${sha}/${f.path.split("/").map(encodeURIComponent).join("/")}`,
+      ...file,
+      text: file.text.slice(0, f === readme ? 6500 : 6000),
     });
   }
   if (!files.length) throw new Error("No readable samples");
   return {
     ...repo,
     sha,
-    evidenceVersion: 2,
+    evidenceVersion: 3,
+    treeComplete: !tree.truncated && blobs.length <= 12000,
     codeSampled: files.some((f) => sources.some((s: any) => s.path === f.path)),
     repositoryId: meta.id,
     description: String(meta.description ?? "").slice(0, 1000),
@@ -202,10 +201,10 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     tree: [
       ...new Set([
         ...files.map((f) => f.path),
-        ...blobs.slice(0, 400).map((f: any) => String(f.path)),
+        ...blobs.slice(0, 12000).map((f: any) => String(f.path)),
       ]),
     ],
-    truncated: !!tree.truncated || blobs.length > 400,
+    truncated: !!tree.truncated || blobs.length > 12000,
     files,
   };
 }
@@ -309,7 +308,7 @@ export async function readPublicRepoFile(source: Evidence, file: string) {
   if (
     !source.tree.includes(file) ||
     file.split("/").some((p) => p === ".." || p === ".") ||
-    !/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|cpp|h|c|svelte|vue|json|toml|md)$/i.test(
+    !/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|cpp|h|c|svelte|vue|sh|kt|swift|rb|ex|exs|json|toml|md|mod|xml|rst|txt)$/i.test(
       file,
     )
   )
@@ -336,7 +335,7 @@ export async function completeSourceTree(source: Evidence): Promise<Evidence> {
     .filter(
       (f: any) =>
         f.type === "blob" &&
-        /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|c|cpp|h|svelte|vue|md|json|toml)$/.test(
+        /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|c|cpp|h|svelte|vue|sh|kt|swift|rb|ex|exs|md|json|toml)$/.test(
           f.path,
         ) &&
         !/(^|\/)(node_modules|vendor|dist|build|fixtures)\//.test(f.path),
@@ -346,8 +345,11 @@ export async function completeSourceTree(source: Evidence): Promise<Evidence> {
     ...source,
     treeComplete: true,
     tree: [
-      ...new Set([...source.files.map((f) => f.path), ...paths.slice(0, 2400)]),
+      ...new Set([
+        ...source.files.map((f) => f.path),
+        ...paths.slice(0, 12000),
+      ]),
     ],
-    truncated: !!tree.truncated || paths.length > 2400,
+    truncated: !!tree.truncated || paths.length > 12000,
   };
 }

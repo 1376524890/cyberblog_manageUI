@@ -421,7 +421,8 @@ const failureDir = await fs.mkdtemp(
 let fail = true;
 const failing = new DailyService(failureDir, {
   ...deps,
-  generate: async () => {
+  generate: async (source) => {
+    source.corePlan.focus = "Persistent research checkpoint";
     if (fail) throw new ApiError(502, "AI_CONNECTION", "模型暂不可用");
     return { model: "mock", analysis: makeAnalysis() };
   },
@@ -441,6 +442,25 @@ check(
   (await failing.status()).runs[0].state === "failed" && saved === 2,
 );
 await failing.tick();
+const failedSource = JSON.parse(
+  await fs.readFile(
+    path.join(
+      failureDir,
+      (await failing.status()).runs[0].date,
+      "1-source-v5.json",
+    ),
+    "utf8",
+  ),
+);
+check(
+  "Failed model call persists research progress for automatic retry",
+  failedSource.corePlan.focus === "Persistent research checkpoint",
+);
+check(
+  "Failure records repository, stage and error code",
+  (await failing.status()).runs[0].failure.project === "team/repo0" &&
+    (await failing.status()).runs[0].failure.code === "AI_CONNECTION",
+);
 check("No tight retry loop", (await failing.status()).runs[0].attempts === 1);
 now = new Date(now.getTime() + 10 * 60000);
 fail = false;
@@ -502,6 +522,39 @@ check(
   "Preserved existing article does not claim new projects or quality approval",
   (await featuredHistory(preservedDir)).length === 0 &&
     !(await preserved.status()).runs[0].quality,
+);
+const upgradedDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-upgrade-"),
+);
+const upgradeDate = dayInShanghai(now);
+await fs.writeFile(
+  path.join(upgradedDir, "state.json"),
+  JSON.stringify({
+    enabled: true,
+    runs: [
+      {
+        date: upgradeDate,
+        state: "failed",
+        attempts: 3,
+        workflowVersion: "old-policy",
+        startedAt: new Date(now.getTime() - 15 * 60000).toISOString(),
+        finishedAt: new Date(now.getTime() - 11 * 60000).toISOString(),
+      },
+    ],
+  }),
+);
+const upgraded = new DailyService(upgradedDir, deps);
+let upgradeWrites = 0;
+upgraded.setWriter(async () => {
+  upgradeWrites++;
+});
+await upgraded.tick();
+await upgraded.wait();
+check(
+  "Scheduler automatically retries exhausted old-version task after workflow upgrade",
+  upgradeWrites === 1 &&
+    (await upgraded.status()).runs[0].attempts === 1 &&
+    (await upgraded.status()).runs[0].state === "done",
 );
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);
