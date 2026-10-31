@@ -1,3 +1,4 @@
+import { assertDiskSpace } from "../core/storage.ts";
 import { Hono } from "hono";
 import { z } from "zod";
 import fs from "node:fs";
@@ -120,6 +121,7 @@ export const toolRoutes = new Hono()
               withoutEnlargement: true,
             })
             .toBuffer();
+    await assertDiskSpace(processed.length);
     await fs.promises.writeFile(abs, processed);
     const sizeKB = Math.round(processed.byteLength / 1024);
     return c.json(

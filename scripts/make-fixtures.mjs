@@ -34,6 +34,7 @@ if (fs.existsSync(fixturesDir)) {
 	}
 }
 fs.mkdirSync(fixturesDir, { recursive: true });
+fs.writeFileSync(path.join(fixturesDir,".cms-disposable"),"cyber-cms-generated-v1\n");
 
 // 1. 远端仓库（非 bare + denyCurrentBranch=updateInstead：允许推入已检出分支并自动同步工作区，
 //    规避沙箱环境对 bare 仓库 init 的限制，同时模拟真实 push 行为）

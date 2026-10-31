@@ -1,0 +1,9 @@
+[Unit]
+Description=Check CyberBlog storage hourly and daily at 04:30
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+OnCalendar=*-*-* 04:30:00 Asia/Shanghai
+Persistent=true
+[Install]
+WantedBy=timers.target

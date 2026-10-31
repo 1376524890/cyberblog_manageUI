@@ -1,3 +1,4 @@
+import { assertDiskSpace } from "../core/storage.ts";
 import { planningPaths } from "./research-policy.ts";
 import {
   canonicalRepo,
@@ -306,6 +307,12 @@ export class DailyService {
       nextRunAt: this.state.enabled ? nextRun(this.deps.now()) : null,
       source: TRENDING,
       diagramEngine: "PNG 架构图片（分层卡片布局）",
+      storage: await readJSON<Record<string, unknown>>(
+        path.join(
+          path.dirname(settingsPath),
+          ".runtime/storage-maintenance.json",
+        ),
+      ).catch(() => null),
       draftOnly: true,
       workflow: DAILY_WORKFLOW,
     };
@@ -361,6 +368,7 @@ export class DailyService {
   private async execute(run: Run) {
     let currentProject: string | undefined;
     try {
+      await assertDiskSpace(32 * 1024 * 1024, this.directory);
       const cacheDir = path.join(this.directory, run.date);
       const rankFile = path.join(cacheDir, "ranking.json");
       const current = await (this.deps.history ?? scanFeaturedPosts)();

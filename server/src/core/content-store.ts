@@ -1,3 +1,4 @@
+import { assertDiskSpace } from "./storage.ts";
 import sharp from "sharp";
 import fs from "node:fs";
 import path from "node:path";
@@ -169,6 +170,7 @@ export async function atomicWrite(
   absPath: string,
   content: string,
 ): Promise<void> {
+  await assertDiskSpace(Buffer.byteLength(content), path.dirname(absPath));
   const tmp = `${absPath}.tmp-${Date.now()}`;
   await fs.promises.writeFile(tmp, content, "utf8");
   await fs.promises.rename(tmp, absPath);
@@ -191,6 +193,7 @@ export async function writePost(
   collection: CollectionName,
   input: WriteInput,
 ): Promise<PostFile> {
+  await assertDiskSpace(16 * 1024 * 1024);
   if (!isValidSlug(input.slug)) {
     throw new ApiError(422, "VALIDATION_FAILED", `slug 非法: ${input.slug}`);
   }

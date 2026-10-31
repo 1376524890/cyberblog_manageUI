@@ -24,3 +24,7 @@ ui-preview.log
 # AI runtime configuration and audit
 .runtime/
 ai-preview.log
+
+# Python maintenance test artifacts
+__pycache__/
+*.pyc

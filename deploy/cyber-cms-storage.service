@@ -1,0 +1,10 @@
+[Unit]
+Description=CyberBlog generated storage retention
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/cyberblog-cms-prod/app/scripts/storage-maintenance.py --apply
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=180
+UMask=0077
+LogNamespace=cyberblog

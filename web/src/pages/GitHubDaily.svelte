@@ -24,6 +24,7 @@
     nextRunAt: string | null;
     source: string;
     workflow?: { version: string; steps: string[] };
+    storage?: {checkedAt:string;pressure:boolean;usedPercent:number;afterFreeBytes:number;removedBytes:number;errors:string[]}|null;
     diagramEngine: string;
     runs: Run[];
   };
@@ -152,6 +153,7 @@
       </p>
     </section>
   </div>
+  {#if state.storage}<section class="panel daily-card"><h2>服务器存储 · 已用 {state.storage.usedPercent}%</h2><p>空闲约 {(state.storage.afterFreeBytes/1073741824).toFixed(1)} GB · 每小时自动检查与清理</p><p class="muted">最近检查 {time(state.storage.checkedAt)}，清理 {(state.storage.removedBytes/1048576).toFixed(1)} MB。保留近期研究缓存与回退备份，博客内容、图片和去重记录长期保留。</p>{#if state.storage.pressure || state.storage.errors?.length}<p class="err">{state.storage.errors?.length ? "自动清理检查异常，请查看服务器维护记录。" : "剩余空间偏低，已采用更短的缓存保留周期。"}</p>{/if}</section>{/if}
   <section class="panel daily-card">
     <h2>运行记录</h2>
     <p class="muted">
