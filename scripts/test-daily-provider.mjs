@@ -158,5 +158,35 @@ await assert.rejects(() => readPublicRepoFile(source, "../private.env"));
 console.log(
   "✓ Source reader rejects paths outside the selected repository tree",
 );
+await generateAnalysis({
+  ...source,
+  tree: [
+    ...source.tree,
+    ...Array.from({ length: 14000 }, (_, i) => `src/module${i}.ts`),
+  ],
+  corePlan: {
+    focus: "fixture core flow",
+    mainFlow: ["输入", "处理"],
+    files: [
+      { path: "src/main.ts", role: "入口", why: "处理输入" },
+      { path: "src/lib.ts", role: "处理", why: "生成输出" },
+    ],
+  },
+  files: [
+    ...source.files,
+    {
+      path: "src/lib.ts",
+      text: "export const task=()=>1",
+      url: `https://github.com/${source.name}/blob/${source.sha}/src/lib.ts`,
+    },
+  ],
+});
+const bounded = JSON.parse(lastRequest.messages[1].content);
+assert.ok(bounded.tree.length <= 124);
+assert.ok(bounded.tree.includes("src/main.ts"));
+assert.ok(bounded.tree.includes("src/lib.ts"));
+console.log(
+  "✓ Large repositories keep full stored evidence but bounded writing context",
+);
 server.close();
-console.log("Daily provider regression: 8 checks passed");
+console.log("Daily provider regression: 9 checks passed");

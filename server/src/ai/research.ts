@@ -74,7 +74,7 @@ async function structured<T>(
 }
 
 export async function planCoreResearch(source: Evidence) {
-  if (!source.treeComplete)
+  if (!source.treeComplete || source.treeVersion !== 6)
     Object.assign(source, await completeSourceTree(source));
   const policy = planningPaths(source.tree);
   const paths = policy.candidates;
@@ -102,7 +102,16 @@ export async function planCoreResearch(source: Evidence) {
         },
       ],
       (raw) => {
+        source.researchDiagnostics = raw;
         const p = planSchema.parse(raw);
+        for (const f of p.files) {
+          if (!paths.includes(f.path)) {
+            const matches = paths.filter((path) =>
+              path.endsWith("/" + f.path.replace(/^\.\//, "")),
+            );
+            if (matches.length === 1) f.path = matches[0];
+          }
+        }
         if (
           p.files.some((f) => !paths.includes(f.path)) ||
           new Set(p.files.map((f) => f.path)).size !== p.files.length ||
@@ -111,7 +120,12 @@ export async function planCoreResearch(source: Evidence) {
           throw new ApiError(
             422,
             "DAILY_RESEARCH",
-            "请选择4至7个给定的真实核心文件，不能选测试、启动包装或配置来凑数",
+            `规划包含${p.files.length}个文件；无效路径：${
+              p.files
+                .filter((f) => !paths.includes(f.path))
+                .map((f) => f.path)
+                .join("、") || "无"
+            }；重复路径：${p.files.length - new Set(p.files.map((f) => f.path)).size}。候选超过20项时请选择4至7个，必须逐字使用给定候选路径，不能猜测目录。`,
           );
         return p;
       },

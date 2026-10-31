@@ -11,6 +11,8 @@ export interface Evidence extends RankedRepo {
   repositoryId?: number;
   evidenceVersion?: number;
   researchVersion?: number;
+  treeVersion?: number;
+  researchDiagnostics?: unknown;
   treeComplete?: boolean;
   corePlan?: {
     focus: string;
@@ -191,7 +193,8 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     ...repo,
     sha,
     evidenceVersion: 3,
-    treeComplete: !tree.truncated && blobs.length <= 12000,
+    treeVersion: 6,
+    treeComplete: !tree.truncated,
     codeSampled: files.some((f) => sources.some((s: any) => s.path === f.path)),
     repositoryId: meta.id,
     description: String(meta.description ?? "").slice(0, 1000),
@@ -201,10 +204,10 @@ export async function evidence(repo: RankedRepo): Promise<Evidence> {
     tree: [
       ...new Set([
         ...files.map((f) => f.path),
-        ...blobs.slice(0, 12000).map((f: any) => String(f.path)),
+        ...blobs.map((f: any) => String(f.path)),
       ]),
     ],
-    truncated: !!tree.truncated || blobs.length > 12000,
+    truncated: !!tree.truncated,
     files,
   };
 }
@@ -327,7 +330,7 @@ export async function readPublicRepoFile(source: Evidence, file: string) {
 }
 
 export async function completeSourceTree(source: Evidence): Promise<Evidence> {
-  if (source.treeComplete) return source;
+  if (source.treeComplete && source.treeVersion === 6) return source;
   const tree = await api(
     `/repos/${source.name}/git/trees/${source.sha}?recursive=1`,
   );
@@ -343,13 +346,9 @@ export async function completeSourceTree(source: Evidence): Promise<Evidence> {
     .map((f: any) => String(f.path));
   return {
     ...source,
+    treeVersion: 6,
     treeComplete: true,
-    tree: [
-      ...new Set([
-        ...source.files.map((f) => f.path),
-        ...paths.slice(0, 12000),
-      ]),
-    ],
-    truncated: !!tree.truncated || paths.length > 12000,
+    tree: [...new Set([...source.files.map((f) => f.path), ...paths])],
+    truncated: !!tree.truncated,
   };
 }

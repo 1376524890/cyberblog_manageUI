@@ -1,3 +1,4 @@
+import { planningPaths } from "./research-policy.ts";
 import {
   canonicalRepo,
   scanFeaturedPosts,
@@ -590,7 +591,19 @@ export async function generateAnalysis(
     },
     {
       role: "user",
-      content: JSON.stringify({ ...source, editorialRevision: revision }),
+      content: JSON.stringify({
+        ...source,
+        tree: source.corePlan
+          ? [
+              ...new Set([
+                ...source.corePlan.files.map((f) => f.path),
+                ...source.files.map((f) => f.path),
+                ...planningPaths(source.tree).candidates.slice(0, 120),
+              ]),
+            ]
+          : source.tree,
+        editorialRevision: revision,
+      }),
     },
   ];
   let repairs = 0,

@@ -119,6 +119,18 @@ globalThis.fetch = async (url) => {
         ? {
             truncated: false,
             tree: [
+              ...Array.from({ length: 13000 }, (_, i) => ({
+                type: "blob",
+                path: `docs/ref-${i}.md`,
+                size: 30,
+                sha: "e".repeat(40),
+              })),
+              {
+                type: "blob",
+                path: "zzzz/product.md",
+                size: 30,
+                sha: "f".repeat(40),
+              },
               {
                 type: "blob",
                 path: "README.md",
@@ -153,6 +165,8 @@ try {
       assert.equal(apiRequests, 3);
       assert.equal(htmlRequests, 3);
       assert.equal(ev.treeComplete, true);
+      assert.ok(ev.tree.includes("zzzz/product.md"));
+      assert.ok(ev.tree.length > 12000);
       assert.ok(ev.files.some((f) => f.path === "go.mod"));
     },
   );
