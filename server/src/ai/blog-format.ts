@@ -19,6 +19,15 @@ export const DAILY_WORKFLOW = {
     "保存为草稿",
   ],
 };
+export const DAILY_SERIES = "GitHub每日精选";
+// Calendar order anchored to the first edition; retries keep the same chapter number.
+export function dailySeriesOrder(date: string) {
+  const order =
+    (Date.parse(date + "T00:00:00Z") - Date.UTC(2026, 9, 30)) / 86400000 + 1;
+  if (!Number.isInteger(order) || order < 1)
+    throw new ApiError(422, "DAILY_DATE", "每日精选日期无效");
+  return order;
+}
 export interface ProjectArticle {
   source: Evidence;
   analysis: Analysis;
@@ -83,6 +92,8 @@ export function composeBlogDraft(
       draft: true,
       description: `介绍 ${names} 五个开源项目，讲解实际用途、使用方法与代码结构。`,
       category: "技术分享",
+      series: DAILY_SERIES,
+      seriesOrder: dailySeriesOrder(date),
       tags: ["GitHub", "开源", "每日热门", "源码阅读"],
       author: "Cyber先锋社",
       lang: "zh-CN",

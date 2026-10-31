@@ -281,6 +281,10 @@ check(
     !post.body.includes("```mermaid") &&
     !post.body.includes("阅读与复核说明"),
 );
+check(
+  "Automatic draft joins GitHub daily series with stable chapter order",
+  post.data.series === "GitHub每日精选" && post.data.seriesOrder === 1,
+);
 const files = execFileSync(
   "git",
   ["show", "--name-only", "--format=", "HEAD"],
@@ -364,6 +368,11 @@ check(
   "Scheduled run saves a real illustrated draft through the same API",
   scheduled.data.draft === true &&
     (scheduled.body.match(/!\[/g) ?? []).length === 5,
+);
+check(
+  "Next scheduled day continues the same series automatically",
+  scheduled.data.series === "GitHub每日精选" &&
+    scheduled.data.seriesOrder === 2,
 );
 check(
   "Scheduled draft passed automatic quality gates",
