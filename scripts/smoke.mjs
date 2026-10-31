@@ -15,7 +15,7 @@ console.log("unauth:", r1.status);
 const r2 = await fetch(`${BASE}/auth/login`, {
 	method: "POST",
 	headers: { "Content-Type": "application/json" },
-	body: JSON.stringify({ password: "admin123" }),
+	body: JSON.stringify({ username: "cyberclubadmin", password: "admin123" }),
 });
 console.log("login:", r2.status);
 const token = (await r2.json()).token;

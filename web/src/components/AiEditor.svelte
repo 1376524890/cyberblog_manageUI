@@ -1,7 +1,7 @@
 <script lang="ts">
   import TokenUsage from "./TokenUsage.svelte";
   import { createEventDispatcher, onDestroy } from "svelte";
-  import { api } from "../lib/api.ts";
+  import { api, isAdmin } from "../lib/api.ts";
   import { messageOf, type Collection } from "../lib/content.ts";
   export let body = "",
     title = "",
@@ -97,7 +97,7 @@
         <select aria-label="AI 编辑任务" bind:value={mode} disabled={busy}
           >{#each modes as m}<option value={m.value}>{m.label}</option
             >{/each}</select
-        ><a href="#/ai-settings">模型设置 ↗</a>
+        >{#if isAdmin()}<a href="#/ai-settings">模型设置 ↗</a>{/if}
       </div>
       <label class="form-field"
         ><span>补充要求（可选）</span><textarea

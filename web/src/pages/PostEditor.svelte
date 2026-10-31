@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import {
     api,
+    isAdmin,
     navigate,
     setUnsavedChanges,
     contentSaved,
@@ -20,6 +21,47 @@
   import Icon from "../components/Icon.svelte";
   export let collection: Collection = "posts";
   export let slug = "";
+  export let draftId = "";
+  const admin = isAdmin();
+  let workflow: {
+    id: string;
+    collection: Collection;
+    slug: string;
+    data: Record<string, unknown>;
+    body: string;
+    status: "draft" | "pending" | "approved";
+    revision: number;
+    reviewNote: string;
+  } | null = null;
+  let reviewNote = "";
+  $: locked = !!draftId && !!workflow && workflow.status !== "draft";
+  $: if (locked) showPreview = true;
+  async function review(action: "submit" | "approve" | "return") {
+    if (!workflow || saving) return;
+    if (dirty) {
+      error = "请先保存修改再提交";
+      return;
+    }
+    saving = true;
+    error = "";
+    try {
+      workflow = await api.post(`/drafts/${workflow.id}/${action}`, {
+        revision: workflow.revision,
+        ...(action === "return" ? { note: reviewNote } : {}),
+      });
+      message =
+        action === "submit"
+          ? "已提交到待发布队列，等待管理员审核。"
+          : action === "approve"
+            ? "审核通过，已保存到博客仓库。请前往发布中心统一推送。"
+            : "已退回创作者修改。";
+      contentSaved();
+    } catch (e) {
+      error = messageOf(e);
+    } finally {
+      saving = false;
+    }
+  }
   interface Detail {
     slug: string;
     data: Record<string, unknown>;
@@ -115,7 +157,7 @@
     );
   }
 
-  $: isNew = slug === "new";
+  $: isNew = draftId ? draftId === "new" : slug === "new";
   $: state = JSON.stringify({
     title,
     published,
@@ -247,9 +289,23 @@
         order = 0;
       }
       if (!isNew) {
-        post = await api.get<Detail>(
-          `/${collection}/${encodeURIComponent(slug)}`,
-        );
+        if (draftId) {
+          workflow = await api.get(`/drafts/${draftId}`);
+          collection = workflow!.collection;
+          slug = workflow!.slug;
+          filename = slug;
+          post = {
+            slug,
+            data: workflow!.data,
+            extraFields: {},
+            body: workflow!.body,
+            version: { head: "", fileMtimeMs: 0 },
+            postUrl: null,
+          };
+        } else
+          post = await api.get<Detail>(
+            `/${collection}/${encodeURIComponent(slug)}`,
+          );
         const d =
           collection === "spec"
             ? { ...post.extraFields, ...post.data }
@@ -299,14 +355,14 @@
     }
   }
   async function refreshImages() {
-    if (!post) return;
+    if (!post || draftId) return;
     const r = await api.get<{ images: typeof images }>(
       `/${collection}/${encodeURIComponent(post.slug)}/images`,
     );
     images = r.images;
   }
   async function save(publish = false) {
-    if (saving || uploading) return;
+    if (saving || uploading || locked) return;
     error = "";
     message = "";
     saving = true;
@@ -318,6 +374,29 @@
       if (collection === "posts" && passwordProtected && !password.trim())
         throw new Error("启用密码保护后，请填写文章访问密码");
       const payload = data();
+      if (draftId) {
+        const request = {
+          collection,
+          slug: filename.trim(),
+          data: payload,
+          body,
+          revision: workflow?.revision,
+        };
+        if (isNew) {
+          const created = await api.post<{ id: string }>("/drafts", request);
+          snapshot = state;
+          setUnsavedChanges(false);
+          contentSaved();
+          navigate(`/drafts/${created.id}`);
+        } else {
+          workflow = await api.put(`/drafts/${draftId}`, request);
+          snapshot = state;
+          setUnsavedChanges(false);
+          message = "草稿已保存，可提交到待发布队列。";
+          contentSaved();
+        }
+        return;
+      }
       if (isNew) {
         let target = filename.trim();
         if (collection !== "dynamic" && !target)
@@ -399,12 +478,15 @@
     saving = true;
     error = "";
     try {
-      await api.del(`/${collection}/${encodeURIComponent(slug)}`, {
-        expected: post.version,
-      });
+      if (draftId && workflow)
+        await api.del(`/drafts/${draftId}`, { revision: workflow.revision });
+      else
+        await api.del(`/${collection}/${encodeURIComponent(slug)}`, {
+          expected: post.version,
+        });
       setUnsavedChanges(false);
       contentSaved();
-      navigate(`/${collection}`);
+      navigate(draftId ? "/drafts" : `/${collection}`);
     } catch (e) {
       error = messageOf(e);
     } finally {
@@ -433,7 +515,18 @@
     }
   }
   onMount(() => {
-    void load();
+    void load()
+      .then(async () => {
+        if (collection === "posts" && draftId) {
+          const [m, s] = await Promise.all([
+            api.get<typeof meta>("/meta"),
+            api.get<{ items: typeof seriesList }>("/series"),
+          ]);
+          meta = m;
+          seriesList = s.items;
+        }
+      })
+      .catch((e) => (error = messageOf(e)));
     if (collection === "posts")
       void Promise.all([
         api.get<typeof meta>("/meta"),
@@ -458,7 +551,7 @@
   <div>
     <div class="eyebrow">CONTENT / {collection.toUpperCase()}</div>
     <h1>{isNew ? "新建" : "编辑"}{collections[collection].singular}</h1>
-    <a class="muted" href={`#/${collection}`}
+    <a class="muted" href={draftId ? "#/drafts" : `#/${collection}`}
       >← 返回{collections[collection].label}</a
     >
   </div>
@@ -466,324 +559,380 @@
     <span class="save-state">{dirty ? "● 有未保存修改" : "✓ 内容已保存"}</span
     ><button on:click={download}>导出正文</button><button
       class="primary"
-      disabled={saving || uploading || loading}
+      disabled={saving || uploading || loading || locked}
       on:click={() => save()}>{saving ? "保存中…" : "保存内容"}</button
-    >{#if !isNew}<button
+    >{#if !isNew && !draftId}<button
         disabled={saving || uploading || loading}
         on:click={() => save(true)}>保存并推送</button
       >{/if}
+    {#if workflow?.status === "draft"}<button
+        class="primary"
+        disabled={saving || dirty}
+        on:click={() => review("submit")}>提交待发布</button
+      >{/if}
+    {#if workflow?.status === "pending" && admin}<button
+        class="primary"
+        disabled={saving}
+        on:click={() => review("approve")}>审核通过</button
+      ><input
+        aria-label="退回原因"
+        placeholder="退回原因"
+        bind:value={reviewNote}
+      /><button
+        disabled={saving || !reviewNote.trim()}
+        on:click={() => review("return")}>退回修改</button
+      >{/if}
   </div>
 </div>
+{#if draftId}<p class="hint">
+    {workflow?.status === "pending"
+      ? "待发布：已锁定稿件，等待管理员审核。"
+      : workflow?.status === "approved"
+        ? "审核通过：管理员将统一推送发布。"
+        : "稿件独立保存，提交后由管理员审核发布。"}{#if workflow?.reviewNote}<br
+      />退回原因：{workflow.reviewNote}{/if}
+  </p>{/if}
 {#if error}<div class="err" role="alert">
     {error}{#if !post && !isNew}<button on:click={load}>重新加载</button>{/if}
   </div>{/if}{#if message}<div class="msg" role="status">{message}</div>{/if}
 {#if loading}<div class="empty">正在载入编辑器…</div>{:else if post || isNew}
-  <div class="editor-layout" class:member-layout={collection === "projects"}>
-    <section class="panel content-editor">
-      <div class="editor-top">
-        <span
-          >{post?.editorMode === "plaintext"
-            ? "MDX 源码"
-            : "Markdown 正文"}</span
-        >
-        <div class="view-tabs">
-          <button
-            class:chosen={!showPreview}
-            on:click={() => (showPreview = false)}>编辑</button
+  <fieldset disabled={locked} class="draft-fieldset">
+    <div class="editor-layout" class:member-layout={collection === "projects"}>
+      <section class="panel content-editor">
+        <div class="editor-top">
+          <span
+            >{post?.editorMode === "plaintext"
+              ? "MDX 源码"
+              : "Markdown 正文"}</span
+          >
+          <div class="view-tabs">
+            <button
+              class:chosen={!showPreview}
+              on:click={() => (showPreview = false)}>编辑</button
+            ><button
+              class:chosen={showPreview}
+              on:click={() => (showPreview = true)}>预览</button
+            >
+          </div>
+        </div>
+        <AiEditor
+          {body}
+          {title}
+          {description}
+          {tags}
+          {collection}
+          on:apply={(e) => applySuggestion(e.detail)}
+        />
+        <TemplatePicker
+          {collection}
+          {title}
+          {body}
+          on:apply={(e) => applySuggestion(e.detail)}
+        />
+        <div class="markdown-tools">
+          <button on:click={() => insert("**", "**")} disabled={showPreview}
+            >粗体</button
+          ><button on:click={() => insert("\n## ")} disabled={showPreview}
+            >标题</button
+          ><button on:click={() => insert("\n- ")} disabled={showPreview}
+            >列表</button
           ><button
-            class:chosen={showPreview}
-            on:click={() => (showPreview = true)}>预览</button
+            on:click={() => insert("\n```text\n", "\n```\n")}
+            disabled={showPreview}>代码</button
+          ><button
+            on:click={() => insert("[", "](https://)")}
+            disabled={showPreview}>链接</button
+          ><button on:click={undoSuggestion} disabled={!undoStack.length}
+            >撤销 AI / 模板</button
           >
         </div>
-      </div>
-      <AiEditor
-        {body}
-        {title}
-        {description}
-        {tags}
-        {collection}
-        on:apply={(e) => applySuggestion(e.detail)}
-      />
-      <TemplatePicker
-        {collection}
-        {title}
-        {body}
-        on:apply={(e) => applySuggestion(e.detail)}
-      />
-      <div class="markdown-tools">
-        <button on:click={() => insert("**", "**")} disabled={showPreview}
-          >粗体</button
-        ><button on:click={() => insert("\n## ")} disabled={showPreview}
-          >标题</button
-        ><button on:click={() => insert("\n- ")} disabled={showPreview}
-          >列表</button
-        ><button
-          on:click={() => insert("\n```text\n", "\n```\n")}
-          disabled={showPreview}>代码</button
-        ><button
-          on:click={() => insert("[", "](https://)")}
-          disabled={showPreview}>链接</button
-        ><button on:click={undoSuggestion} disabled={!undoStack.length}
-          >撤销 AI / 模板</button
-        >
-      </div>
-      {#if post?.editorMode === "plaintext"}<p class="hint mdx-note">
-          MDX 预览仅展示 Markdown；组件效果以博客构建为准。
-        </p>{/if}
-      {#if showPreview}<iframe
-          class="preview"
-          title="Markdown 预览（隔离环境）"
-          sandbox=""
-          srcdoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: http://127.0.0.1:* data:; style-src 'unsafe-inline'"><style>.markdown-tools{display:flex;flex-wrap:wrap;gap:7px;padding:10px 15px;border-bottom:1px solid #edf0f7}.markdown-tools button{font-size:10px;padding:5px 9px}.editor-layout.member-layout{grid-template-columns:minmax(0,1fr) 410px}@media(max-width:1150px){.editor-layout.member-layout{grid-template-columns:1fr}.member-layout .settings{order:-1}}
+        {#if post?.editorMode === "plaintext"}<p class="hint mdx-note">
+            MDX 预览仅展示 Markdown；组件效果以博客构建为准。
+          </p>{/if}
+        {#if showPreview}<iframe
+            class="preview"
+            title="Markdown 预览（隔离环境）"
+            sandbox=""
+            srcdoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: http://127.0.0.1:* data:; style-src 'unsafe-inline'"><style>.markdown-tools{display:flex;flex-wrap:wrap;gap:7px;padding:10px 15px;border-bottom:1px solid #edf0f7}.markdown-tools button{font-size:10px;padding:5px 9px}.editor-layout.member-layout{grid-template-columns:minmax(0,1fr) 410px}@media(max-width:1150px){.editor-layout.member-layout{grid-template-columns:1fr}.member-layout .settings{order:-1}}
 body{font:14px/1.9 system-ui;color:#334155;padding:20px;overflow-wrap:anywhere}img{max-width:100%}pre{background:#f4f6fb;padding:16px;overflow:auto;border-radius:8px}code{font-size:12px}blockquote{border-left:3px solid #bdc6ef;padding-left:15px;color:#7b88a2}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}a{color:#5366df}</style></head><body>${previewHtml}</body></html>`}
-        ></iframe>
-      {:else}<textarea
-          bind:this={bodyArea}
-          class="markdown-editor"
-          aria-label="Markdown 正文"
-          bind:value={body}
-          placeholder="在这里记录你的探索…"
-          spellcheck="false"
-        ></textarea>{/if}
-      <div class="editor-footer">
-        <span
-          >{body.length.toLocaleString()} 字符 · {body.split("\n").length} 行</span
-        ><span>⌘ / Ctrl + S 保存</span>
-      </div>
-      {#if post}<div class="image-tools">
-          <label class="button upload"
-            >{uploading ? "正在上传…" : "＋ 上传图片"}<input
-              type="file"
-              accept=".png,.jpg,.jpeg,.webp,.avif,.gif"
-              multiple
-              disabled={uploading || saving}
-              on:change={uploadImage}
-            /></label
-          ><small>PNG / JPG / WebP / AVIF / GIF，最大 5MB</small
-          >{#each images as img}<button
-              class="image-ref"
-              title={`${img.sizeKB}KB · 点击插入正文`}
-              on:click={() => (body += `\n![](${img.refPath})\n`)}
-              >{img.name}</button
-            ><button class="image-ref" on:click={() => (image = img.refPath)}
-              >{collection === "projects" ? "设为头像" : "设为封面"}</button
-            >{/each}
-        </div>{/if}
-    </section>
-    <aside class="settings">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>内容属性</h2>
-          <span class="badge neutral">{isNew ? "NEW" : slug}</span>
+          ></iframe>
+        {:else}<textarea
+            bind:this={bodyArea}
+            class="markdown-editor"
+            aria-label="Markdown 正文"
+            bind:value={body}
+            placeholder="在这里记录你的探索…"
+            spellcheck="false"
+          ></textarea>{/if}
+        <div class="editor-footer">
+          <span
+            >{body.length.toLocaleString()} 字符 · {body.split("\n").length} 行</span
+          ><span>⌘ / Ctrl + S 保存</span>
         </div>
-        <div class="panel-body fields">
-          {#if isNew}<label class="form-field"
-              >文件标识{collection === "dynamic"
-                ? "（留空自动生成）"
-                : ""}<input
-                bind:value={filename}
-                placeholder="例如 cyber-club-news"
+        {#if post && !draftId}<div class="image-tools">
+            <label class="button upload"
+              >{uploading ? "正在上传…" : "＋ 上传图片"}<input
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.avif,.gif"
+                multiple
+                disabled={uploading || saving}
+                on:change={uploadImage}
               /></label
-            >{/if}
-          {#if collection !== "spec"}<label class="form-field"
-              >{collection === "dynamic"
-                ? "动态标题（可选）"
-                : collection === "projects"
-                  ? "成员名称"
-                  : "标题"}<input bind:value={title} /></label
-            ><label class="form-field"
-              >{collection === "projects" ? "资料建立日期" : "发布日期"}<input
-                type="date"
-                bind:value={published}
-              /></label
-            >{/if}
-          {#if collection === "posts"}<label class="form-field"
-              >更新日期<input type="date" bind:value={updated} /></label
-            ><label class="form-field"
-              >分类<input list="categories" bind:value={category} /><datalist
-                id="categories"
-                >{#each meta?.categories ?? [] as c}<option value={c.name}
-                  ></option>{/each}</datalist
-              ></label
-            >{/if}
-          {#if collection === "posts" || collection === "projects"}<label
-              class="form-field"
-              >摘要<textarea rows="3" bind:value={description}
-              ></textarea></label
-            >{#if collection === "posts"}<div class="form-field">
-                <span>标签</span><TagPicker
-                  bind:value={tags}
-                  suggestions={meta?.tags?.map((t) => t.name) ?? []}
-                />
-              </div>
-              <label class="form-field"
-                >封面图路径<input
-                  bind:value={image}
-                  placeholder="图片路径或 HTTPS 地址"
-                /></label
-              >{/if}<label class="check-field"
-              ><input
-                type="checkbox"
-                bind:checked={draft}
-              />草稿（博客前台不显示）</label
-            >{/if}
-          {#if collection === "dynamic"}<label class="form-field"
-              >地点<input
-                list="dynamic-locations"
-                bind:value={locationName}
-                placeholder="选择常用地点或自定义"
-              /><datalist id="dynamic-locations"
-                ><option value="线上"></option><option value="社团活动室"
-                ></option><option value="校内"></option><option value="校外"
-                ></option></datalist
-              ></label
-            >{/if}
-          {#if collection === "posts" || collection === "dynamic"}<label
-              class="check-field"
-              ><input type="checkbox" bind:checked={pinned} />置顶内容</label
-            >{/if}
-          {#if collection === "spec"}<label class="form-field"
-              >页面名称<input
-                bind:value={title}
-                placeholder="用于管理识别"
-              /></label
-            ><label class="form-field"
-              >页面摘要<textarea rows="3" bind:value={description}
-              ></textarea></label
-            ><label class="form-field"
-              >语言<select bind:value={lang}
-                ><option value="">跟随站点</option><option value="zh-CN"
-                  >简体中文</option
-                ><option value="en">English</option
-                >{#if lang && !["zh-CN", "en"].includes(lang)}<option
-                    value={lang}>{lang}</option
-                  >{/if}</select
-              ></label
-            >
-            <details>
-              <summary>其他页面属性（高级）</summary><label class="form-field"
-                >JSON 对象<textarea
-                  rows="12"
-                  bind:value={extraJson}
-                  spellcheck="false"
-                ></textarea></label
-              >
-              <p class="hint">
-                会保留未修改的属性。页面正文用于关于、友链或留言页。
-              </p>
-            </details>
-            <p class="hint">
-              独立页面的前台路由由博客工程定义，新增文件不会自动新增路由。
-            </p>{/if}
-          {#if collection === "posts"}<label class="form-field"
-              >系列<input list="series" bind:value={series} /><datalist
-                id="series"
-                >{#each seriesList as s}<option value={s.name}
-                  ></option>{/each}</datalist
-              ></label
-            ><label class="form-field"
-              >章节序号<input
-                type="number"
-                step="1"
-                min="1"
-                bind:value={seriesOrder}
-              /></label
-            >{/if}
-          {#if collection === "projects"}<MemberFields
-              bind:status
-              bind:order
-              bind:tags
-              bind:image
-              bind:lang
-              bind:links={memberLinks}
-              {slug}
-              {isNew}
-              on:upload={() => refreshImages()}
-            />{/if}
-        </div>
+            ><small>PNG / JPG / WebP / AVIF / GIF，最大 5MB</small
+            >{#each images as img}<button
+                class="image-ref"
+                title={`${img.sizeKB}KB · 点击插入正文`}
+                on:click={() => (body += `\n![](${img.refPath})\n`)}
+                >{img.name}</button
+              ><button class="image-ref" on:click={() => (image = img.refPath)}
+                >{collection === "projects" ? "设为头像" : "设为封面"}</button
+              >{/each}
+          </div>{/if}
       </section>
-      {#if collection === "posts"}<section class="panel">
-          <details class="advanced">
-            <summary>访问与版权设置</summary>
-            <div class="fields">
-              <label class="form-field">作者<input bind:value={author} /></label
-              ><label class="form-field"
-                >语言<input bind:value={lang} placeholder="zh-CN" /></label
-              ><label class="form-field"
-                >原文链接<input bind:value={sourceLink} /></label
-              ><label class="form-field"
-                >许可证名称<input bind:value={licenseName} /></label
-              ><label class="form-field"
-                >许可证链接<input bind:value={licenseUrl} /></label
-              ><label class="check-field"
-                ><input type="checkbox" bind:checked={comment} />允许评论</label
-              >
-              <label class="check-field"
-                ><input
-                  type="checkbox"
-                  bind:checked={passwordProtected}
-                />启用文章密码保护</label
-              >
-              <p class="hint">
-                {passwordProtected
-                  ? "本文需要访问密码，与管理界面登录密码独立。"
-                  : "公开访问：文章无需密码，默认不启用保护。"}
-              </p>
-              {#if passwordProtected}
-                <label class="form-field"
-                  >文章访问密码<input
-                    type="password"
-                    name="article-access-password"
-                    autocomplete="new-password"
-                    bind:value={password}
-                  /></label
-                >
-                <label class="form-field"
-                  >密码提示<input
-                    name="article-password-hint"
-                    autocomplete="off"
-                    bind:value={passwordHint}
-                  /></label
-                >
-              {/if}
-            </div>
-          </details>
-        </section>{/if}
-      {#if post}<section class="panel">
-          <div class="panel-body fields">
-            <p class="hint">
-              文件标识：{slug}<br />保存仅提交到仓库，推送后才触发博客构建。
-            </p>
-            {#if post.postUrl}<a
-                class="button"
-                href={`https://www.cyberpioneer.club${post.postUrl}`}
-                target="_blank"
-                rel="noreferrer">查看博客页面 <Icon name="arrow" size={14} /></a
-              >{/if}<button
-              class="danger"
-              on:click={() => (showDelete = !showDelete)}
-              >删除此{collections[collection].singular}</button
-            >{#if showDelete}<div class="delete-confirm">
-                <p>
-                  将删除内容文件并创建删除提交。可通过 Git 历史恢复。输入 <strong
-                    >{slug}</strong
-                  > 确认。
-                </p>
-                <input
-                  aria-label="输入文件标识确认删除"
-                  bind:value={deleteText}
-                /><button
-                  class="danger"
-                  disabled={deleteText !== slug || saving}
-                  on:click={remove}>确认删除</button
-                >
-              </div>{/if}
+      <aside class="settings">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>内容属性</h2>
+            <span class="badge neutral">{isNew ? "NEW" : slug}</span>
           </div>
-        </section>{/if}
-    </aside>
-  </div>{/if}
+          <div class="panel-body fields">
+            {#if isNew || draftId}<label class="form-field"
+                >文件标识{collection === "dynamic" && !draftId
+                  ? "（留空自动生成）"
+                  : ""}<input
+                  bind:value={filename}
+                  placeholder="例如 cyber-club-news"
+                /></label
+              >{/if}
+            {#if collection !== "spec"}<label class="form-field"
+                >{collection === "dynamic"
+                  ? "动态标题（可选）"
+                  : collection === "projects"
+                    ? "成员名称"
+                    : "标题"}<input bind:value={title} /></label
+              ><label class="form-field"
+                >{collection === "projects" ? "资料建立日期" : "发布日期"}<input
+                  type="date"
+                  bind:value={published}
+                /></label
+              >{/if}
+            {#if collection === "posts"}<label class="form-field"
+                >更新日期<input type="date" bind:value={updated} /></label
+              ><label class="form-field"
+                >分类{#if draftId && !admin}<select bind:value={category}
+                    ><option value="">未分类</option
+                    >{#each meta?.categories ?? [] as c}<option value={c.name}
+                        >{c.name}</option
+                      >{/each}</select
+                  >{:else}<input
+                    list="categories"
+                    bind:value={category}
+                  />{/if}<datalist id="categories"
+                  >{#each meta?.categories ?? [] as c}<option value={c.name}
+                    ></option>{/each}</datalist
+                ></label
+              >{/if}
+            {#if collection === "posts" || collection === "projects"}<label
+                class="form-field"
+                >摘要<textarea rows="3" bind:value={description}
+                ></textarea></label
+              >{#if collection === "posts"}<div class="form-field">
+                  <span>标签</span><TagPicker
+                    bind:value={tags}
+                    suggestions={meta?.tags?.map((t) => t.name) ?? []}
+                  />
+                </div>
+                <label class="form-field"
+                  >封面图路径<input
+                    bind:value={image}
+                    placeholder="图片路径或 HTTPS 地址"
+                  /></label
+                >{/if}{#if !draftId}<label class="check-field"
+                  ><input
+                    type="checkbox"
+                    bind:checked={draft}
+                  />草稿（博客前台不显示）</label
+                >{/if}{/if}
+            {#if collection === "dynamic"}<label class="form-field"
+                >地点<input
+                  list="dynamic-locations"
+                  bind:value={locationName}
+                  placeholder="选择常用地点或自定义"
+                /><datalist id="dynamic-locations"
+                  ><option value="线上"></option><option value="社团活动室"
+                  ></option><option value="校内"></option><option value="校外"
+                  ></option></datalist
+                ></label
+              >{/if}
+            {#if !draftId && (collection === "posts" || collection === "dynamic")}<label
+                class="check-field"
+                ><input type="checkbox" bind:checked={pinned} />置顶内容</label
+              >{/if}
+            {#if collection === "spec"}<label class="form-field"
+                >页面名称<input
+                  bind:value={title}
+                  placeholder="用于管理识别"
+                /></label
+              ><label class="form-field"
+                >页面摘要<textarea rows="3" bind:value={description}
+                ></textarea></label
+              ><label class="form-field"
+                >语言<select bind:value={lang}
+                  ><option value="">跟随站点</option><option value="zh-CN"
+                    >简体中文</option
+                  ><option value="en">English</option
+                  >{#if lang && !["zh-CN", "en"].includes(lang)}<option
+                      value={lang}>{lang}</option
+                    >{/if}</select
+                ></label
+              >
+              <details>
+                <summary>其他页面属性（高级）</summary><label class="form-field"
+                  >JSON 对象<textarea
+                    rows="12"
+                    bind:value={extraJson}
+                    spellcheck="false"
+                  ></textarea></label
+                >
+                <p class="hint">
+                  会保留未修改的属性。页面正文用于关于、友链或留言页。
+                </p>
+              </details>
+              <p class="hint">
+                独立页面的前台路由由博客工程定义，新增文件不会自动新增路由。
+              </p>{/if}
+            {#if collection === "posts"}<label class="form-field"
+                >系列{#if draftId && !admin}<select bind:value={series}
+                    ><option value="">无系列</option
+                    >{#each seriesList as s}<option value={s.name}
+                        >{s.name}</option
+                      >{/each}</select
+                  >{:else}<input
+                    list="series"
+                    bind:value={series}
+                  />{/if}<datalist id="series"
+                  >{#each seriesList as s}<option value={s.name}
+                    ></option>{/each}</datalist
+                ></label
+              ><label class="form-field"
+                >章节序号<input
+                  type="number"
+                  step="1"
+                  min="1"
+                  bind:value={seriesOrder}
+                /></label
+              >{/if}
+            {#if collection === "projects"}<MemberFields
+                bind:status
+                bind:order
+                bind:tags
+                bind:image
+                bind:lang
+                bind:links={memberLinks}
+                {slug}
+                isNew={isNew || !!draftId}
+                on:upload={() => refreshImages()}
+              />{/if}
+          </div>
+        </section>
+        {#if collection === "posts"}<section class="panel">
+            <details class="advanced">
+              <summary>访问与版权设置</summary>
+              <div class="fields">
+                <label class="form-field"
+                  >作者<input bind:value={author} /></label
+                ><label class="form-field"
+                  >语言<input bind:value={lang} placeholder="zh-CN" /></label
+                ><label class="form-field"
+                  >原文链接<input bind:value={sourceLink} /></label
+                ><label class="form-field"
+                  >许可证名称<input bind:value={licenseName} /></label
+                ><label class="form-field"
+                  >许可证链接<input bind:value={licenseUrl} /></label
+                ><label class="check-field"
+                  ><input
+                    type="checkbox"
+                    bind:checked={comment}
+                  />允许评论</label
+                >
+                <label class="check-field"
+                  ><input
+                    type="checkbox"
+                    bind:checked={passwordProtected}
+                  />启用文章密码保护</label
+                >
+                <p class="hint">
+                  {passwordProtected
+                    ? "本文需要访问密码，与管理界面登录密码独立。"
+                    : "公开访问：文章无需密码，默认不启用保护。"}
+                </p>
+                {#if passwordProtected}
+                  <label class="form-field"
+                    >文章访问密码<input
+                      type="password"
+                      name="article-access-password"
+                      autocomplete="new-password"
+                      bind:value={password}
+                    /></label
+                  >
+                  <label class="form-field"
+                    >密码提示<input
+                      name="article-password-hint"
+                      autocomplete="off"
+                      bind:value={passwordHint}
+                    /></label
+                  >
+                {/if}
+              </div>
+            </details>
+          </section>{/if}
+      </aside>
+    </div>
+  </fieldset>
+  {#if post && (!draftId || admin)}<section class="panel">
+      <div class="panel-body fields">
+        <p class="hint">
+          文件标识：{slug}<br />{draftId
+            ? "删除稿件记录不会删除已审核的博客内容。"
+            : "保存仅提交到仓库，推送后才触发博客构建。"}
+        </p>
+        {#if post.postUrl}<a
+            class="button"
+            href={`https://www.cyberpioneer.club${post.postUrl}`}
+            target="_blank"
+            rel="noreferrer">查看博客页面 <Icon name="arrow" size={14} /></a
+          >{/if}<button
+          class="danger"
+          on:click={() => (showDelete = !showDelete)}
+          >{draftId
+            ? "删除稿件记录"
+            : `删除此${collections[collection].singular}`}</button
+        >{#if showDelete}<div class="delete-confirm">
+            <p>
+              {draftId
+                ? "将删除此投稿记录。"
+                : "将删除内容文件并创建删除提交，可通过 Git 历史恢复。"}输入
+              <strong>{slug}</strong> 确认。
+            </p>
+            <input
+              aria-label="输入文件标识确认删除"
+              bind:value={deleteText}
+            /><button
+              class="danger"
+              disabled={deleteText !== slug || saving}
+              on:click={remove}>确认删除</button
+            >
+          </div>{/if}
+      </div>
+    </section>{/if}{/if}
 
 <style>
+  .draft-fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
   .markdown-tools {
     display: flex;
     flex-wrap: wrap;

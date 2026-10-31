@@ -2,17 +2,18 @@
   import { api } from "../lib/api.ts";
   import { messageOf } from "../lib/content.ts";
   import Icon from "../components/Icon.svelte";
-  let password = "",
+  let username = "",
+    password = "",
     error = "",
     busy = false,
     visible = false;
   async function login() {
-    if (busy || !password) return;
+    if (busy || !username || !password) return;
     error = "";
     busy = true;
     try {
-      await api.post("/auth/login", { password });
-      location.hash = "/ai";
+      await api.post("/auth/login", { username, password });
+      location.hash = "/drafts";
       location.reload();
     } catch (e) {
       error = messageOf(e);
@@ -48,14 +49,23 @@
       <div class="eyebrow">WELCOME BACK</div>
       <h2>登录内容工作台</h2>
       <p class="muted">新的灵感，从这里开始。</p>
-      {#if error}<div class="err" role="alert">{error}</div>{/if}<label
-        for="admin-password">管理密码</label
-      >
+      {#if error}<div class="err" role="alert">{error}</div>{/if}
+      <label for="username">账号</label>
+      <div class="password-field" style="margin-bottom: 20px">
+        <input
+          id="username"
+          placeholder="请输入账号"
+          autocomplete="username"
+          required
+          bind:value={username}
+        />
+      </div>
+      <label for="admin-password">登录密码</label>
       <div class="password-field">
         <input
           id="admin-password"
           type={visible ? "text" : "password"}
-          placeholder="请输入管理密码"
+          placeholder="请输入登录密码"
           autocomplete="current-password"
           required
           bind:value={password}
@@ -66,11 +76,14 @@
           >{visible ? "隐藏" : "显示"}</button
         >
       </div>
-      <button class="primary submit" type="submit" disabled={busy || !password}
+      <button
+        class="primary submit"
+        type="submit"
+        disabled={busy || !username || !password}
         >{busy ? "正在登录…" : "进入工作台"}<span>→</span></button
       >
       <div class="login-note">
-        <span class="status-dot"></span>仅限授权管理员访问
+        <span class="status-dot"></span>管理员审核发布 · 创作者投稿
       </div>
     </form>
     <small class="login-copyright"

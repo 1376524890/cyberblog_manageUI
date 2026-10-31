@@ -217,7 +217,7 @@ check(
 const auth = await fetch(base + "/auth/login", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ password: "admin123" }),
+  body: JSON.stringify({ username: "cyberclubadmin", password: "admin123" }),
 }).then((r) => r.json());
 const headers = {
   "Content-Type": "application/json",

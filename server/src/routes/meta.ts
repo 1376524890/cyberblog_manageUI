@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { identityOf } from "../middleware.ts";
 import { listCollection } from "../core/content-store.ts";
 
 /** 独立 handler（平铺挂载到 v1 根：GET /api/v1/series、GET /api/v1/meta） */
@@ -74,9 +75,9 @@ export async function metaHandler(c: any): Promise<Response> {
 				{ key: "updated", type: "date", required: false, label: "更新日期" },
 				{ key: "description", type: "string", required: false, label: "摘要" },
 				{ key: "image", type: "image", required: false, label: "封面图" },
-				{ key: "category", type: "string", required: false, enumFrom: "categories", allowCreate: true, label: "分类" },
+				{ key: "category", type: "string", required: false, enumFrom: "categories", allowCreate: identityOf(c).role === "admin", label: "分类" },
 				{ key: "tags", type: "string[]", required: false, suggestFrom: "tags", label: "标签" },
-				{ key: "series", type: "string", required: false, enumFrom: "series", allowCreate: true, label: "系列" },
+				{ key: "series", type: "string", required: false, enumFrom: "series", allowCreate: identityOf(c).role === "admin", label: "系列" },
 				{ key: "seriesOrder", type: "number", required: false, label: "系列序号" },
 				{ key: "draft", type: "boolean", required: false, label: "草稿" },
 				{ key: "pinned", type: "boolean", required: false, label: "置顶" },

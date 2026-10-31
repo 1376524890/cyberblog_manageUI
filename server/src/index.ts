@@ -8,7 +8,14 @@ import { serve } from "@hono/node-server";
 import fs from "node:fs";
 import path from "node:path";
 import { config, validateConfig } from "./config.ts";
-import { authMiddleware, errorHandler } from "./middleware.ts";
+import {
+  authMiddleware,
+  errorHandler,
+  roleMiddleware,
+  identityOf,
+} from "./middleware.ts";
+import { ensureCreatorAccount } from "./core/auth.ts";
+import { draftRoutes } from "./routes/drafts.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { collectionRoutes } from "./routes/collections.ts";
 import { metaHandler, seriesHandler } from "./routes/meta.ts";
@@ -18,6 +25,11 @@ import { templates } from "./core/templates.ts";
 import { gitRoutes } from "./routes/git.ts";
 
 validateConfig();
+const initialCreatorPassword = ensureCreatorAccount();
+if (initialCreatorPassword)
+  console.log(
+    `[cms] 创作者账号 cyberclubcreator 初始密码（仅首次显示）: ${initialCreatorPassword}`,
+  );
 
 const app = new Hono();
 
@@ -33,11 +45,16 @@ app.use("*", async (c, next) => {
 });
 
 const v1 = new Hono();
+v1.use("*", async (c, next) => {
+  c.header("Cache-Control", "private, no-store");
+  await next();
+});
 
 // 认证（login/logout 不需要认证）
 v1.route("/auth", authRoutes);
 // 认证中间件：之后注册的全部路由受保护
 v1.use("*", authMiddleware());
+v1.use("*", roleMiddleware());
 // Serialize content mutations and Git operations in this single-process service.
 let mutationTail = Promise.resolve();
 v1.use("*", async (c, next) => {
@@ -59,7 +76,8 @@ v1.use("*", async (c, next) => {
   }
 });
 // /me 必须在 authMiddleware 之后注册（受保护）
-v1.get("/auth/me", (c) => c.json({ role: "admin", expiresAt: null }));
+v1.get("/auth/me", (c) => c.json({ ...identityOf(c), expiresAt: null }));
+v1.route("/drafts", draftRoutes);
 v1.route("/posts", collectionRoutes("posts"));
 v1.route("/dynamic", collectionRoutes("dynamic"));
 v1.route("/projects", collectionRoutes("projects"));
@@ -168,7 +186,10 @@ daily.setWriter(async (draft) => {
     body: draft.body,
     reason: "管理员授权的 GitHub 每日 Top 5 草稿任务",
   });
-  const token = createSession().token;
+  const token = createSession({
+    username: config.adminUsername,
+    role: "admin",
+  }).token;
   return apply(p.id, async (method, url, body) => {
     if (method !== "POST" || url !== "/posts")
       throw new Error("Draft creation only");

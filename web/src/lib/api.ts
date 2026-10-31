@@ -90,3 +90,15 @@ export const setUnsavedChanges = (value: boolean) => {
 };
 export const hasUnsavedChanges = () => unsaved;
 export const contentSaved = () => window.dispatchEvent(new Event("cms:saved"));
+
+export interface CurrentUser {
+  username: string;
+  role: "admin" | "creator";
+}
+let currentUser: CurrentUser;
+export function setCurrentUser(user: CurrentUser) {
+  currentUser = user;
+}
+export function isAdmin() {
+  return currentUser?.role === "admin";
+}

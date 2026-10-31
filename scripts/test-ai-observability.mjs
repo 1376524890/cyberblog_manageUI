@@ -136,7 +136,7 @@ let r = await req("GET", "/ai/usage");
 check("用量接口需要认证", r.status === 401);
 r = await req("GET", "/ai/diagnostics");
 check("诊断结果需要认证", r.status === 401);
-token = (await req("POST", "/auth/login", { password: "admin123" })).data.token;
+token = (await req("POST", "/auth/login", { username: "cyberclubadmin", password: "admin123" })).data.token;
 r = await req("GET", "/ai/usage");
 check(
   "初次使用有准确空状态",

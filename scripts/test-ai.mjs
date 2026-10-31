@@ -157,7 +157,7 @@ async function chat() {
 }
 let r = await req("GET", "/ai/settings");
 check("AI 设置需要认证", r.status === 401);
-token = (await req("POST", "/auth/login", { password: "admin123" })).data.token;
+token = (await req("POST", "/auth/login", { username: "cyberclubadmin", password: "admin123" })).data.token;
 r = await req("POST", "/ai/edit", { mode: "format", body: "x" });
 check("未配置 AI 时清楚提示", r.status === 409);
 const settings = {
@@ -421,7 +421,7 @@ try {
     operation: "update",
     collection: "posts",
     slug: "cpp-tutorial-01",
-    data: { password: "new" },
+    data: { username: "cyberclubadmin", password: "new" },
   });
 } catch {
   rejected = true;

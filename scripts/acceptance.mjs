@@ -64,10 +64,10 @@ console.log("== 1. 认证 ==");
 	let r = await req("GET", "/posts");
 	check("未认证访问被拒（401）", r.status === 401);
 
-	r = await req("POST", "/auth/login", { password: "wrong-password" });
+	r = await req("POST", "/auth/login", { username: "cyberclubadmin", password: "wrong-password" });
 	check("错误密码 401", r.status === 401);
 
-	r = await req("POST", "/auth/login", { password: PASSWORD });
+	r = await req("POST", "/auth/login", { username: "cyberclubadmin", password: PASSWORD });
 	check("正确密码登录成功", r.status === 200 && r.json?.ok === true);
 	token = r.json?.token ?? "";
 	check("返回 Bearer token", typeof token === "string" && token.length > 10);

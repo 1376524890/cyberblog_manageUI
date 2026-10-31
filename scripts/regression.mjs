@@ -10,13 +10,13 @@ let token='',passed=0;
 async function req(method,url,data,form=false){const r=await fetch(base+url,{method,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(!form&&data!==undefined?{'Content-Type':'application/json'}:{})},body:data===undefined?undefined:form?data:JSON.stringify(data)});return {status:r.status,data:await r.json()};}
 function check(label,condition){assert.ok(condition,label);console.log('✓',label);passed++;}
 for(let i=0;i<30;i++){try{await fetch(base+'/auth/me');break;}catch{await new Promise(r=>setTimeout(r,100));}}
-token=(await req('POST','/auth/login',{password:'admin123'})).data.token;
+token=(await req('POST','/auth/login',{username:'cyberclubadmin',password:'admin123'})).data.token;
 let r=await req('GET','/posts?page=abc');check('拒绝非法分页',r.status===422);
 r=await req('POST','/posts',{slug:'bad-date',data:{title:'bad',published:'2026-02-30'}});check('拒绝不存在的日期',r.status===422);
 r=await req('POST','/posts',{slug:'invalid-commit',data:{title:'bad',published:'2026-10-30'},commitMessage:'bad'});check('错误提交说明不写入文件',r.status===422&&!fs.existsSync(path.join(repo,'src/content/posts/invalid-commit.md')));
 r=await req('POST','/posts',{slug:'regression-post',data:{title:'回归验证',published:'2026-10-30',updated:'2026-10-30',series:'系列',seriesOrder:2,password:'test-password',description:'第一行\n第二行'},body:'# 验证'});check('创建含多行摘要的文章',r.status===201);
 let p=(await req('GET','/posts/regression-post')).data;check('多行摘要原样读取',p.data.description==='第一行\n第二行');
-r=await req('PUT','/posts/regression-post',{expected:p.version,data:{password:'',updated:null,seriesOrder:null},body:p.body});check('字段清空保存成功',r.status===200);
+r=await req('PUT','/posts/regression-post',{expected:p.version,data:{username:'cyberclubadmin',password:'',updated:null,seriesOrder:null},body:p.body});check('字段清空保存成功',r.status===200);
 p=(await req('GET','/posts/regression-post')).data;check('密码日期与章节序号已清空',p.data.password===''&&!p.data.updated&&p.data.seriesOrder===undefined);
 const form=new FormData();form.append('file',new Blob([Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64')],{type:'image/gif'}),'pixel.gif');
 r=await req('POST','/posts/regression-post/images',form,true);check('图片上传路径包含文章目录',r.status===201&&r.data.refPath.startsWith('./images/regression-post/'));
