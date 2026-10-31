@@ -719,11 +719,20 @@ export class DailyService {
     const date = dayInShanghai(now);
     if (now < new Date(`${date}T08:00:00+08:00`)) return;
     const last = this.state.runs.find((r) => r.date === date);
+    if (last?.failure?.code === "DISK_SPACE_LOW") {
+      try {
+        await assertDiskSpace(32 * 1024 * 1024, this.directory);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === "DISK_SPACE_LOW") return;
+        throw e;
+      }
+    }
     if (
       last?.state === "done" ||
       (last &&
         ((last.workflowVersion === DAILY_WORKFLOW.version &&
-          last.attempts >= 3) ||
+          last.attempts >= 3 &&
+          last.failure?.code !== "DISK_SPACE_LOW") ||
           now.getTime() -
             new Date(last.finishedAt ?? last.startedAt).getTime() <
             10 * 60000))

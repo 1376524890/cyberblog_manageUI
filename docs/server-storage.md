@@ -23,3 +23,5 @@ python3 /root/cyberblog-cms-prod/app/scripts/storage-maintenance.py
 最后一条是只读预览。首次安装仅给本项目已有部署备份与已知生成测试目录添加清理标记，并保留原目录时间；未来新增部署备份应放在同一备份根目录，创建 `.cms-disposable` 文件且内容为 `cyber-cms-generated-v1`。没有标记的备份与测试目录保留。写入保护不会删除内容来腾出空间，人工新增的大文件仍需按用途处理。
 
 验证：`python3 scripts/test-storage-maintenance.py` 和 `server/node_modules/.bin/tsx scripts/test-storage.mjs`，测试使用隔离临时目录，覆盖干跑、活动任务、保留底线、目录符号链接、压力清理和损坏状态的保守处理。
+
+日报因磁盘空间不足暂停后，调度器会先检查可用容量，不消耗模型调用；清理恢复容量后重新尝试，即使此前已用完普通失败的三次自动尝试。其他失败仍遵循原次数上限。

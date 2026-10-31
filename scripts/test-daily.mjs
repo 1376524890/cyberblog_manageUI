@@ -633,5 +633,40 @@ check(
   "Retry remembers today's rejected candidates instead of repeating failed research",
   rejects === rejectedBeforeRetry,
 );
+const recoveredSpaceDir = await fs.mkdtemp(
+  path.join(
+    path.dirname(process.env.CMS_AI_ENV_FILE),
+    "daily-recovered-space-",
+  ),
+);
+await fs.writeFile(
+  path.join(recoveredSpaceDir, "state.json"),
+  JSON.stringify({
+    enabled: true,
+    runs: [
+      {
+        date: dayInShanghai(now),
+        state: "failed",
+        attempts: 3,
+        workflowVersion: (await service.status()).workflow.version,
+        failure: { code: "DISK_SPACE_LOW", stage: "disk" },
+        startedAt: new Date(now.getTime() - 15 * 60000).toISOString(),
+        finishedAt: new Date(now.getTime() - 11 * 60000).toISOString(),
+      },
+    ],
+  }),
+);
+const recoveredSpace = new DailyService(recoveredSpaceDir, deps);
+let recoveredWrites = 0;
+recoveredSpace.setWriter(async () => {
+  recoveredWrites++;
+});
+await recoveredSpace.tick();
+await recoveredSpace.wait();
+check(
+  "Scheduler resumes low-space failure after cleanup restores disk capacity",
+  recoveredWrites === 1 &&
+    (await recoveredSpace.status()).runs[0].state === "done",
+);
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);
