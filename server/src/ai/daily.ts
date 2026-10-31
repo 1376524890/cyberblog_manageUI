@@ -450,9 +450,10 @@ export class DailyService {
           }
         }
         try {
-          result ??= await this.deps.generate(ev, (text) => {
+          result ??= await this.deps.generate(ev, async (text) => {
             run.progress = `${repo.rank}/5 ${repo.name} · ${text}`;
-            void this.persist();
+            await this.persist();
+            await writeJSON(evPath, ev);
           });
           validateAnalysis(result.analysis, ev);
         } finally {
@@ -673,18 +674,20 @@ export async function generateAnalysis(
 }
 export async function authorReviewedProject(
   source: Evidence,
-  progress: (text: string) => void = () => {},
+  progress: (text: string) => void | Promise<void> = () => {},
 ) {
-  progress("规划核心链路并阅读关键实现");
+  await progress("规划核心链路并阅读关键实现");
   await planCoreResearch(source);
   let revision = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    progress(attempt ? "按审稿意见改进正文和配图" : "撰写博客与设计架构图");
+    await progress(
+      attempt ? "按审稿意见改进正文和配图" : "撰写博客与设计架构图",
+    );
     const result = await generateAnalysis(source, readPublicRepoFile, revision);
-    progress("审阅核心链路、具体内容与博客语气");
+    await progress("审阅核心链路、具体内容与博客语气");
     const review = await reviewCoreResult(source, result.analysis);
+    source.semanticReview = review;
     if (review.passed) {
-      source.semanticReview = review;
       return result;
     }
     revision =
@@ -695,7 +698,9 @@ export async function authorReviewedProject(
   throw new ApiError(
     422,
     "DAILY_EDITORIAL_REVIEW",
-    "项目主流程、具体内容或配图审稿尚未通过，未保存草稿",
+    "项目审稿未通过：" +
+      (source.semanticReview?.checks.issues.join("；") ||
+        "主流程、具体内容或配图待完善"),
   );
 }
 export async function generateOverview(

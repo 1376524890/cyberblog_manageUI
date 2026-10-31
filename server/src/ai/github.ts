@@ -11,6 +11,7 @@ export interface Evidence extends RankedRepo {
   repositoryId?: number;
   evidenceVersion?: number;
   researchVersion?: number;
+  researchDepth?: number;
   treeVersion?: number;
   researchDiagnostics?: unknown;
   treeComplete?: boolean;

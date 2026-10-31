@@ -1,3 +1,7 @@
+import {
+  forwardingOnly,
+  implementationLinks,
+} from "../server/src/ai/source-links.ts";
 import assert from "node:assert/strict";
 import {
   researchPolicy,
@@ -105,6 +109,45 @@ check("Large trees produce bounded and diverse planning prompts", () => {
   assert.equal(p.candidates.length, 700);
   assert.ok(p.candidates.includes("services/chat/src/main.ts"));
   assert.ok(p.candidates.includes("crates/storage/src/lib.rs"));
+});
+check(
+  "Rust forwarding modules lead to actual implementations without executing code",
+  () => {
+    const file = {
+      path: "crates/search/src/domain.rs",
+      text: "// entry\npub mod service;\npub mod model;",
+    };
+    assert.equal(forwardingOnly(file), true);
+    assert.deepEqual(
+      implementationLinks(
+        [
+          file.path,
+          "crates/search/src/domain/service.rs",
+          "crates/search/src/domain/model.rs",
+        ],
+        file,
+      ),
+      [
+        "crates/search/src/domain/service.rs",
+        "crates/search/src/domain/model.rs",
+      ],
+    );
+    assert.equal(
+      forwardingOnly({
+        path: "src/lib.rs",
+        text: "pub fn process() -> bool { true }",
+      }),
+      false,
+    );
+  },
+);
+check("TypeScript exports resolve only real repository paths", () => {
+  const file = { path: "src/index.ts", text: 'export * from "./engine";' };
+  assert.equal(forwardingOnly(file), true);
+  assert.deepEqual(implementationLinks([file.path, "src/engine.ts"], file), [
+    "src/engine.ts",
+  ]);
+  assert.deepEqual(implementationLinks([file.path], file), []);
 });
 const original = globalThis.fetch;
 let apiRequests = 0,

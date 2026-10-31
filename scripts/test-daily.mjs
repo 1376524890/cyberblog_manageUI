@@ -421,8 +421,16 @@ const failureDir = await fs.mkdtemp(
 let fail = true;
 const failing = new DailyService(failureDir, {
   ...deps,
-  generate: async (source) => {
+  generate: async (source, progress) => {
     source.corePlan.focus = "Persistent research checkpoint";
+    await progress("保存研究检查点");
+    const checkpoint = JSON.parse(
+      await fs.readFile(
+        path.join(failureDir, dayInShanghai(now), "1-source-v5.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(checkpoint.corePlan.focus, "Persistent research checkpoint");
     if (fail) throw new ApiError(502, "AI_CONNECTION", "模型暂不可用");
     return { model: "mock", analysis: makeAnalysis() };
   },
