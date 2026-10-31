@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "grounded-research-resumable-png-v8",
+  version: "qualified-candidates-resumable-png-v9",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [

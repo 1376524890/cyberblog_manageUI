@@ -9,6 +9,7 @@
     state: string;
     progress: string;
     error?: string;
+    skipped?: {name:string; reason:string}[];
     slug?: string;
     attempts: number;
     model?: string;
@@ -175,6 +176,7 @@
             ✓ 核心链路和图文检查通过 · {run.quality.figures} 张 PNG
           </p>{/if}
         {#if run.error}<p class="err">{run.error}</p>{/if}
+        {#if run.skipped?.length}<details class="daily-skipped"><summary>未入选候选 · {run.skipped.length} 个</summary><p class="muted">这些项目未通过本次内容检查，按日榜顺序继续选择；未标记为已介绍。</p><ul>{#each run.skipped as skipped}<li><strong>{skipped.name}</strong>：{skipped.reason}</li>{/each}</ul></details>{/if}
         <p class="muted">
           开始 {time(run.startedAt)} · 结束 {time(run.finishedAt)} · 第 {run.attempts}
           次尝试{#if run.model}

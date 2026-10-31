@@ -564,5 +564,65 @@ check(
     (await upgraded.status()).runs[0].attempts === 1 &&
     (await upgraded.status()).runs[0].state === "done",
 );
+const fallbackDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-fallback-"),
+);
+const fallbackService = new DailyService(fallbackDir, {
+  ...deps,
+  generate: async (source) => {
+    if (source.name === "team/repo0")
+      throw new ApiError(422, "DAILY_EDITORIAL_REVIEW", "项目未通过审稿");
+    return { model: "mock", analysis: makeAnalysis() };
+  },
+});
+let fallbackDraft;
+fallbackService.setWriter(async (d) => {
+  fallbackDraft = d;
+});
+await fallbackService.configure(true);
+await fallbackService.tick();
+await fallbackService.wait();
+check(
+  "Content failure automatically selects the next fresh daily candidate",
+  (await fallbackService.status()).runs[0].state === "done" &&
+    fallbackDraft.githubRepos.map((r) => r.name).join(",") ===
+      "team/repo1,team/repo2,team/repo3,team/repo4,team/repo5",
+);
+check(
+  "Unqualified candidate retains reason but is not marked featured",
+  (await fallbackService.status()).runs[0].skipped[0].name === "team/repo0" &&
+    !(await featuredHistory(fallbackDir)).some((h) => h.repo === "team/repo0"),
+);
+const exhaustedDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-exhausted-"),
+);
+let rejects = 0;
+const exhaustedService = new DailyService(exhaustedDir, {
+  ...deps,
+  generate: async () => {
+    rejects++;
+    throw new ApiError(422, "DAILY_RESEARCH", "未获得实际实现");
+  },
+});
+let exhaustedWrites = 0;
+exhaustedService.setWriter(async () => {
+  exhaustedWrites++;
+});
+await exhaustedService.start();
+await exhaustedService.wait();
+check(
+  "Candidate budget stops bad content without writing a partial draft",
+  rejects <= 10 &&
+    rejects >= 5 &&
+    exhaustedWrites === 0 &&
+    (await exhaustedService.status()).runs[0].state === "failed",
+);
+const rejectedBeforeRetry = rejects;
+await exhaustedService.start();
+await exhaustedService.wait();
+check(
+  "Retry remembers today's rejected candidates instead of repeating failed research",
+  rejects === rejectedBeforeRetry,
+);
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);

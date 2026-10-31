@@ -215,12 +215,18 @@ interface Run {
   progress: string;
   error?: string;
   failure?: { project?: string; stage: string; code: string };
+  skipped?: { name: string; code: string; reason: string; stage: string }[];
   slug?: string;
   attempts: number;
   workflowVersion?: string;
   model?: string;
   quality?: BlogQuality;
-  ranking?: { name: string; rank: number; todayStars: number | null }[];
+  ranking?: {
+    name: string;
+    rank: number;
+    todayStars: number | null;
+    trendingRank?: number;
+  }[];
 }
 interface State {
   enabled: boolean;
@@ -370,14 +376,25 @@ export class DailyService {
         fetchedAt: string;
         candidates?: NonNullable<Run["ranking"]>;
         ranking: Run["ranking"];
+        skipped?: Run["skipped"];
       }>(rankFile);
+      run.skipped = snapshot?.skipped ?? [];
+      const exclusions = () => [
+        ...history,
+        ...(run.skipped ?? []).map((s) => ({
+          repo: s.name,
+          slug: "",
+          date: run.date,
+          recordedAt: "",
+        })),
+      ];
       // Resume the day's chosen source snapshot; refresh only when no fresh selection remains.
       let candidates =
         snapshot?.candidates ??
         snapshot?.ranking ??
         (await this.deps.trending());
       try {
-        run.ranking = selectUnfeatured(candidates, history);
+        run.ranking = selectUnfeatured(candidates, exclusions());
       } catch (e) {
         if (
           !(e instanceof ApiError) ||
@@ -386,12 +403,13 @@ export class DailyService {
         )
           throw e;
         candidates = await this.deps.trending();
-        run.ranking = selectUnfeatured(candidates, history);
+        run.ranking = selectUnfeatured(candidates, exclusions());
       }
       await writeJSON(rankFile, {
         fetchedAt: this.deps.now().toISOString(),
         candidates,
         ranking: run.ranking,
+        skipped: run.skipped,
       });
       const projects: ProjectArticle[] = [];
       const assets: ImageAsset[] = [];
@@ -400,88 +418,215 @@ export class DailyService {
         headline: string;
         opening: string;
       }[] = [];
-      for (const repo of run.ranking) {
-        currentProject = repo.name;
-        run.progress = `分析 ${repo.rank}/5：${repo.name}`;
-        await this.persist();
-        const evPath = path.join(cacheDir, `${repo.rank}-source-v5.json`);
-        let ev = await readJSON<Evidence>(evPath);
-        if (ev && canonicalRepo(ev.name) !== canonicalRepo(repo.name))
-          ev = null;
-        if (!ev) ev = await this.deps.evidence(repo);
-        ev = { ...ev, ...repo };
-        const duplicate = duplicateFeature(ev, history);
-        if (duplicate) {
-          await rememberFeatured(this.directory, [
-            {
-              ...duplicate,
-              repo: ev.name,
-              id: ev.repositoryId ?? duplicate.id,
-            },
-          ]);
-          throw new ApiError(
-            409,
-            "DAILY_RENAMED_PROJECT",
-            "仓库更名后与历史项目重复，已记住别名，下次重试会跳过",
-          );
-        }
-        await writeJSON(evPath, ev);
-        const analysisPath = path.join(
-          cacheDir,
-          `${repo.rank}-analysis-reviewed-v5.json`,
-        );
-        const cached = await readJSON<{
-          analysis: Analysis;
-          model: string;
-          sourceRepo: string;
-          sourceSha: string;
-        }>(analysisPath);
-        let result: { analysis: Analysis; model: string } | null = null;
-        if (
-          cached &&
-          canonicalRepo(cached.sourceRepo) === canonicalRepo(ev.name) &&
-          cached.sourceSha === ev.sha
-        ) {
+      for (let repo of run.ranking) {
+        while (true) {
           try {
-            validateAnalysis(cached.analysis, ev);
-            result = cached;
+            currentProject = repo.name;
+            run.progress = `分析 ${repo.rank}/5：${repo.name}`;
+            await this.persist();
+            const evPath = path.join(cacheDir, `${repo.rank}-source-v5.json`);
+            const projectDir = path.join(
+              cacheDir,
+              "projects",
+              repo.name.toLowerCase().replace("/", "--"),
+            );
+            let ev = await readJSON<Evidence>(evPath);
+            if (ev && canonicalRepo(ev.name) !== canonicalRepo(repo.name))
+              ev = null;
+            if (!ev)
+              ev = await readJSON<Evidence>(
+                path.join(projectDir, "source.json"),
+              );
+            if (!ev) ev = await this.deps.evidence(repo);
+            ev = { ...ev, ...repo };
+            const duplicate = duplicateFeature(ev, history);
+            if (duplicate) {
+              await rememberFeatured(this.directory, [
+                {
+                  ...duplicate,
+                  repo: ev.name,
+                  id: ev.repositoryId ?? duplicate.id,
+                },
+              ]);
+              throw new ApiError(
+                409,
+                "DAILY_RENAMED_PROJECT",
+                "仓库更名后与历史项目重复，已记住别名，下次重试会跳过",
+              );
+            }
+            await writeJSON(evPath, ev);
+            const analysisPath = path.join(
+              cacheDir,
+              `${repo.rank}-analysis-reviewed-v5.json`,
+            );
+            let cached = await readJSON<{
+              analysis: Analysis;
+              model: string;
+              sourceRepo: string;
+              sourceSha: string;
+            }>(analysisPath);
+            if (
+              !cached ||
+              canonicalRepo(cached.sourceRepo) !== canonicalRepo(repo.name)
+            )
+              cached = await readJSON(path.join(projectDir, "analysis.json"));
+            let result: { analysis: Analysis; model: string } | null = null;
+            if (
+              cached &&
+              canonicalRepo(cached.sourceRepo) === canonicalRepo(ev.name) &&
+              cached.sourceSha === ev.sha
+            ) {
+              try {
+                validateAnalysis(cached.analysis, ev);
+                result = cached;
+              } catch (e) {
+                if (!(e instanceof ApiError || e instanceof z.ZodError))
+                  throw e;
+              }
+            }
+            try {
+              result ??= await this.deps.generate(ev, async (text) => {
+                run.progress = `${repo.rank}/5 ${repo.name} · ${text}`;
+                await this.persist();
+                await writeJSON(evPath, ev);
+              });
+              validateAnalysis(result.analysis, ev);
+            } finally {
+              // Keep the actual research and read files even if writing/review needs a later retry.
+              await writeJSON(evPath, ev);
+            }
+            const a = result.analysis;
+            run.model = result.model;
+            await writeJSON(analysisPath, {
+              ...result,
+              sourceRepo: ev.name,
+              sourceSha: ev.sha,
+            });
+            await writeJSON(path.join(projectDir, "source.json"), ev);
+            await writeJSON(path.join(projectDir, "analysis.json"), {
+              ...result,
+              sourceRepo: ev.name,
+              sourceSha: ev.sha,
+            });
+            const png = await renderArchitecturePNG(repo.name, a);
+            const filename = `${String(repo.rank).padStart(2, "0")}-${repo.name
+              .split("/")[1]
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, "-")
+              .slice(0, 40)}-architecture.png`;
+            await fs.writeFile(path.join(cacheDir, filename), png, {
+              mode: 0o600,
+            });
+            assets.push({ name: filename, data: png.toString("base64") });
+            introductions.push({
+              name: repo.name,
+              headline: a.headline,
+              opening: a.paragraphs[0],
+            });
+            projects.push({ source: ev, analysis: a, filename });
+            break;
           } catch (e) {
-            if (!(e instanceof ApiError || e instanceof z.ZodError)) throw e;
+            const localCodes = new Set([
+              "DAILY_RESEARCH",
+              "DAILY_CORE_DIAGRAM",
+              "DAILY_EDITORIAL_REVIEW",
+              "DAILY_EVIDENCE",
+              "DAILY_BLOG_DETAIL",
+              "DAILY_FORMAT",
+              "DAILY_BLOG_VOICE",
+              "DAILY_SOURCE_LINK",
+              "DAILY_MODEL_SHAPE",
+              "GITHUB_NO_CODE",
+              "DAILY_RENAMED_PROJECT",
+            ]);
+            if (
+              !(e instanceof z.ZodError) &&
+              !(e instanceof ApiError && localCodes.has(e.code))
+            )
+              throw e;
+            const failure = {
+              name: repo.name,
+              code: e instanceof ApiError ? e.code : "DAILY_MODEL_SHAPE",
+              reason:
+                e instanceof ApiError ? e.message : "项目内容未通过结构校验",
+              stage: run.progress,
+            };
+            run.skipped!.push(failure);
+            await writeJSON(
+              path.join(
+                cacheDir,
+                "rejected",
+                repo.name.replace(/[^a-z0-9_.-]/gi, "-") + ".json",
+              ),
+              {
+                failure,
+                source: await readJSON(
+                  path.join(cacheDir, `${repo.rank}-source-v5.json`),
+                ),
+              },
+            );
+            await writeJSON(rankFile, {
+              fetchedAt: snapshot?.fetchedAt ?? this.deps.now().toISOString(),
+              candidates,
+              ranking: run.ranking,
+              skipped: run.skipped,
+            });
+            const blocked = new Set([
+              ...history.map((h) => canonicalRepo(h.repo)),
+              ...projects.map((p) => canonicalRepo(p.source.name)),
+              ...run.skipped!.map((r) => canonicalRepo(r.name)),
+            ]);
+            const remaining = candidates.filter(
+              (r) => !blocked.has(canonicalRepo(r.name)),
+            );
+            const needed = 5 - projects.length;
+            if (
+              remaining.length < needed ||
+              projects.length + run.skipped!.length >= 10
+            )
+              throw new ApiError(
+                422,
+                "DAILY_QUALIFIED_PROJECTS_INSUFFICIENT",
+                "当天可用候选尚未凑齐五个通过审稿的新项目，已保存研究结果与未入选原因，稍后重试",
+              );
+            run.ranking!.splice(
+              projects.length,
+              needed,
+              ...remaining.slice(0, needed).map((r, i) => ({
+                ...r,
+                trendingRank: r.trendingRank ?? r.rank,
+                rank: projects.length + i + 1,
+              })),
+            );
+            repo = run.ranking![projects.length];
+            run.progress = `继续研究日榜候选 ${repo.name}`;
+            await writeJSON(rankFile, {
+              fetchedAt: snapshot?.fetchedAt ?? this.deps.now().toISOString(),
+              candidates,
+              ranking: run.ranking,
+              skipped: run.skipped,
+            });
+            await this.persist();
           }
         }
-        try {
-          result ??= await this.deps.generate(ev, async (text) => {
-            run.progress = `${repo.rank}/5 ${repo.name} · ${text}`;
-            await this.persist();
-            await writeJSON(evPath, ev);
-          });
-          validateAnalysis(result.analysis, ev);
-        } finally {
-          // Keep the actual research and read files even if writing/review needs a later retry.
-          await writeJSON(evPath, ev);
-        }
-        const a = result.analysis;
-        run.model = result.model;
-        await writeJSON(analysisPath, {
-          ...result,
-          sourceRepo: ev.name,
-          sourceSha: ev.sha,
-        });
-        const png = await renderArchitecturePNG(repo.name, a);
-        const filename = `${String(repo.rank).padStart(2, "0")}-${repo.name
-          .split("/")[1]
-          .toLowerCase()
-          .replace(/[^a-z0-9-]/g, "-")
-          .slice(0, 40)}-architecture.png`;
-        await fs.writeFile(path.join(cacheDir, filename), png, { mode: 0o600 });
-        assets.push({ name: filename, data: png.toString("base64") });
-        introductions.push({
-          name: repo.name,
-          headline: a.headline,
-          opening: a.paragraphs[0],
-        });
-        projects.push({ source: ev, analysis: a, filename });
       }
+      projects.sort(
+        (a, b) =>
+          (a.source.trendingRank ?? a.source.rank) -
+          (b.source.trendingRank ?? b.source.rank),
+      );
+      projects.forEach((p, i) => (p.source.rank = i + 1));
+      run.ranking = projects.map((p) => ({
+        name: p.source.name,
+        rank: p.source.rank,
+        todayStars: p.source.todayStars,
+        trendingRank: p.source.trendingRank,
+      }));
+      introductions.sort(
+        (a, b) =>
+          projects.findIndex((p) => p.source.name === a.name) -
+          projects.findIndex((p) => p.source.name === b.name),
+      );
       currentProject = undefined;
       run.progress = "撰写开篇与收尾，保存图文草稿";
       await this.persist();
