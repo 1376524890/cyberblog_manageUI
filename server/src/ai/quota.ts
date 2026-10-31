@@ -18,6 +18,17 @@ const schema = z.object({
     z.object({ used: integer, reserved: integer, estimated: integer }),
   ),
   reservations: z.record(z.object({ key: z.string(), amount: integer })),
+  resets: z
+    .array(
+      z.object({
+        time: z.string(),
+        actor: z.string(),
+        target: z.string(),
+        previousUsed: integer,
+        reserved: integer,
+      }),
+    )
+    .default([]),
 });
 type Ledger = z.infer<typeof schema>;
 export interface Reservation {
@@ -72,7 +83,7 @@ async function load(date: string): Promise<Ledger> {
         "AI_QUOTA_UNAVAILABLE",
         "个人额度账目暂时不可用，请稍后重试",
       );
-    ledger = { version: 1, date, accounts: {}, reservations: {} };
+    ledger = { version: 1, date, accounts: {}, reservations: {}, resets: [] };
   }
   if (!initialized.has(file)) {
     // A previous process may have sent these requests upstream. Charge their
@@ -97,6 +108,129 @@ async function load(date: string): Promise<Ledger> {
   }
   return ledger;
 }
+const policySchema = z.object({
+  version: z.literal(1),
+  limits: z.record(z.number().int().min(0).max(1_000_000_000)),
+  changes: z
+    .array(
+      z.object({
+        time: z.string(),
+        actor: z.string(),
+        target: z.string(),
+        previous: z.number(),
+        limit: z.number().nullable(),
+      }),
+    )
+    .default([]),
+});
+function policyPath() {
+  return path.join(privateDir(), "ai-quota-policy.json");
+}
+function policies() {
+  try {
+    return policySchema.parse(
+      JSON.parse(fs.readFileSync(policyPath(), "utf8")),
+    );
+  } catch (e: any) {
+    if (e.code === "ENOENT")
+      return {
+        version: 1 as const,
+        limits: {} as Record<string, number>,
+        changes: [] as z.infer<typeof policySchema>["changes"],
+      };
+    throw new ApiError(
+      503,
+      "AI_QUOTA_POLICY_UNAVAILABLE",
+      "个人额度设置暂时不可用，请联系管理员",
+    );
+  }
+}
+function limitFor(user: Identity): number | null {
+  return user.role === "admin"
+    ? null
+    : (policies().limits[actorKey(user)] ?? USER_DAILY_TOKEN_LIMIT);
+}
+function requireAdmin(admin: Identity) {
+  if (admin.role !== "admin")
+    throw new ApiError(403, "FORBIDDEN", "仅管理员可调整或重置额度");
+}
+export async function setUserLimit(
+  user: Identity,
+  limit: number | null,
+  admin: Identity,
+) {
+  requireAdmin(admin);
+  if (user.role === "admin")
+    throw new ApiError(422, "ADMIN_UNLIMITED", "管理员不限额，无需调整");
+  if (
+    limit !== null &&
+    (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000_000_000)
+  )
+    throw new ApiError(
+      422,
+      "VALIDATION_FAILED",
+      "每日额度必须为 0–10 亿的整数",
+    );
+  await lock(async () => {
+    const policy = policies(),
+      key = actorKey(user),
+      previous = policy.limits[key] ?? USER_DAILY_TOKEN_LIMIT;
+    if (limit === null) delete policy.limits[key];
+    else policy.limits[key] = limit;
+    policy.changes = [
+      ...policy.changes.slice(-999),
+      {
+        time: new Date().toISOString(),
+        actor: actorKey(admin),
+        target: key,
+        previous,
+        limit,
+      },
+    ];
+    const content = JSON.stringify(policy),
+      file = policyPath(),
+      tmp = `${file}.${randomUUID()}.tmp`;
+    await assertDiskSpace(Buffer.byteLength(content));
+    try {
+      fs.writeFileSync(tmp, content, { mode: 0o600, flag: "wx" });
+      fs.renameSync(tmp, file);
+    } finally {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {}
+    }
+  });
+  return quotaFor(user);
+}
+export async function resetUserQuota(user: Identity, admin: Identity) {
+  requireAdmin(admin);
+  if (user.role === "admin")
+    throw new ApiError(422, "ADMIN_UNLIMITED", "管理员不限额，无需重置");
+  await lock(async () => {
+    const ledger = await load(dayOf(new Date())),
+      key = actorKey(user);
+    const account = (ledger.accounts[key] ??= {
+      used: 0,
+      reserved: 0,
+      estimated: 0,
+    });
+    ledger.resets = [
+      ...ledger.resets.slice(-999),
+      {
+        time: new Date().toISOString(),
+        actor: actorKey(admin),
+        target: key,
+        previousUsed: account.used,
+        reserved: account.reserved,
+      },
+    ];
+    // In-flight requests keep their reservation and settle against the new period.
+    account.used = 0;
+    account.estimated = 0;
+    await save(ledger);
+  });
+  return quotaFor(user);
+}
 export async function quotaFor(user: Identity, time = new Date()) {
   return lock(async () => {
     const date = dayOf(time),
@@ -106,15 +240,21 @@ export async function quotaFor(user: Identity, time = new Date()) {
       reserved: 0,
       estimated: 0,
     };
+    const limit = limitFor(user);
     return {
       date,
       timezone: "Asia/Shanghai",
-      limit: USER_DAILY_TOKEN_LIMIT,
+      limit,
+      unlimited: limit === null,
+      defaultLimit: USER_DAILY_TOKEN_LIMIT,
+      customLimit:
+        user.role !== "admin" &&
+        Object.hasOwn(policies().limits, actorKey(user)),
       ...account,
-      remaining: Math.max(
-        0,
-        USER_DAILY_TOKEN_LIMIT - account.used - account.reserved,
-      ),
+      remaining:
+        limit === null
+          ? null
+          : Math.max(0, limit - account.used - account.reserved),
       resetsAt: new Date(
         new Date(`${date}T00:00:00+08:00`).getTime() + 86400000,
       ).toISOString(),
@@ -149,15 +289,16 @@ export async function reserveUserTokens(
       reserved: 0,
       estimated: 0,
     });
+    const limit = limitFor(user);
     if (
       !Number.isSafeInteger(amount) ||
       amount < 0 ||
-      account.used + account.reserved + amount > USER_DAILY_TOKEN_LIMIT
+      (limit !== null && account.used + account.reserved + amount > limit)
     )
       throw new ApiError(
         429,
         "AI_USER_DAILY_LIMIT",
-        "今日个人 token 额度不足以完成本次请求；每人每天 300 万 token，北京时间次日零点恢复",
+        `今日个人 token 额度不足以完成本次请求；当前每日额度 ${limit?.toLocaleString("zh-CN")}，可联系管理员调整或重置，北京时间次日零点恢复`,
       );
     const ticket = { id: randomUUID(), key, date, amount };
     ledger.reservations[ticket.id] = { key, amount };

@@ -683,6 +683,227 @@ try {
     "用户、邀请码和用量不会进入 Git",
     !git("ls-files").includes("cms-private"),
   );
+  const adminIdentity = { username: "cyberclubadmin", role: "admin" };
+  let adminQuota = (await req("GET", "/ai/quota", undefined, admin)).data;
+  check(
+    "管理员显示无限额而非有限数值",
+    adminQuota.unlimited === true &&
+      adminQuota.limit === null &&
+      adminQuota.remaining === null,
+  );
+  const adminTicket = await requestIdentity.run(adminIdentity, () =>
+    reserveUserTokens(5000000),
+  );
+  await settleUserTokens(adminTicket, 5000000);
+  check(
+    "管理员可超出原每日额度且继续统计用量",
+    (await quotaFor(adminIdentity)).used >= 5000000 &&
+      (await quotaFor(adminIdentity)).unlimited,
+  );
+  await req(
+    "PUT",
+    "/ai/settings",
+    { ...settings, dailyTokenLimit: 1, enforceBudget: true },
+    admin,
+  );
+  check(
+    "管理员交互调用不受全站 token 额度限制",
+    (await req("POST", "/ai/edit", { mode: "format", body: "test" }, admin))
+      .status === 200,
+  );
+  await req("PUT", "/ai/settings", settings, admin);
+  check(
+    "创作者不能调整本人额度",
+    (
+      await req(
+        "PUT",
+        `/admin/users/${bobIdentity.userId}/quota`,
+        { limit: 9000000 },
+        bob,
+      )
+    ).status === 403,
+  );
+  check(
+    "创作者不能重置本人用量",
+    (
+      await req(
+        "POST",
+        `/admin/users/${bobIdentity.userId}/quota/reset`,
+        {},
+        bob,
+      )
+    ).status === 403,
+  );
+  for (const value of [-1, 1.5, 1000000001, "1000"])
+    check(
+      `拒绝非法每日额度 ${value}`,
+      (
+        await req(
+          "PUT",
+          `/admin/users/${bobIdentity.userId}/quota`,
+          { limit: value },
+          admin,
+        )
+      ).status === 422,
+    );
+  check(
+    "未知账号不能配置额度",
+    (await req("PUT", "/admin/users/missing/quota", { limit: 1000 }, admin))
+      .status === 404,
+  );
+  check(
+    "管理员账号不能被改为有限额",
+    (
+      await req(
+        "PUT",
+        "/admin/users/builtin-admin/quota",
+        { limit: 1000 },
+        admin,
+      )
+    ).status === 422,
+  );
+  r = await req(
+    "PUT",
+    `/admin/users/${bobIdentity.userId}/quota`,
+    { limit: 120000 },
+    admin,
+  );
+  check(
+    "管理员可为创作者设置自定义每日额度",
+    r.status === 200 && r.data.limit === 120000 && r.data.customLimit,
+  );
+  check(
+    "额度调整不影响其他账号",
+    (await req("GET", "/ai/quota", undefined, alice)).data.limit === 3000000,
+  );
+  const persistedPolicy = JSON.parse(
+    execFileSync(
+      "node",
+      [
+        "--import",
+        "./server/node_modules/tsx/dist/loader.mjs",
+        "--input-type=module",
+        "-e",
+        childCode,
+      ],
+      { cwd, env: process.env, encoding: "utf8" },
+    ),
+  );
+  check("自定义额度跨服务重启持久保存", persistedPolicy.limit === 120000);
+  r = await req(
+    "POST",
+    `/admin/users/${bobIdentity.userId}/quota/reset`,
+    {},
+    admin,
+  );
+  check(
+    "重置当日用量保留自定义限额",
+    r.status === 200 &&
+      r.data.used === 0 &&
+      r.data.estimated === 0 &&
+      r.data.limit === 120000,
+  );
+  await req(
+    "PUT",
+    `/admin/users/${bobIdentity.userId}/quota`,
+    { limit: 0 },
+    admin,
+  );
+  const zeroCalls = modelCalls;
+  check(
+    "额度设为零可暂停创作者 AI",
+    (await req("POST", "/ai/edit", { mode: "format", body: "test" }, bob))
+      .status === 429 && modelCalls === zeroCalls,
+  );
+  await req(
+    "PUT",
+    `/admin/users/${bobIdentity.userId}/quota`,
+    { limit: 5000000 },
+    admin,
+  );
+  const higher = await requestIdentity.run(bobIdentity, () =>
+    reserveUserTokens(4000000),
+  );
+  await settleUserTokens(higher, 4000000);
+  check(
+    "上调额度实际允许超过原 300 万",
+    (await quotaFor(bobIdentity)).used === 4000000,
+  );
+  await req(
+    "PUT",
+    `/admin/users/${bobIdentity.userId}/quota`,
+    { limit: 3000000 },
+    admin,
+  );
+  check(
+    "下调到已用量以下立即阻止新请求",
+    (await req("POST", "/ai/edit", { mode: "format", body: "test" }, bob))
+      .status === 429,
+  );
+  await req(
+    "POST",
+    `/admin/users/${bobIdentity.userId}/quota/reset`,
+    {},
+    admin,
+  );
+  const ongoing = await requestIdentity.run(bobIdentity, () =>
+    reserveUserTokens(1000),
+  );
+  r = await req(
+    "POST",
+    `/admin/users/${bobIdentity.userId}/quota/reset`,
+    {},
+    admin,
+  );
+  check(
+    "重置不会清除正在处理的预留额度",
+    r.data.used === 0 &&
+      r.data.reserved === 1000 &&
+      r.data.remaining === 2999000,
+  );
+  await settleUserTokens(ongoing, 80);
+  check(
+    "重置后进行中的请求仍能正确结算",
+    (await quotaFor(bobIdentity)).used === 80 &&
+      (await quotaFor(bobIdentity)).reserved === 0,
+  );
+  r = await req(
+    "PUT",
+    `/admin/users/${bobIdentity.userId}/quota`,
+    { limit: null },
+    admin,
+  );
+  check(
+    "可恢复默认每日 300 万额度",
+    r.data.limit === 3000000 &&
+      r.data.customLimit === false &&
+      r.data.used === 80,
+  );
+  check(
+    "内置创作者账号也可调整额度",
+    (
+      await req(
+        "PUT",
+        "/admin/users/builtin-creator/quota",
+        { limit: 250000 },
+        admin,
+      )
+    ).data.limit === 250000,
+  );
+  const policyFile = path.join(repo, ".git/cms-private/ai-quota-policy.json");
+  check(
+    "额度调整文件权限为 600 并记录管理员操作",
+    (fs.statSync(policyFile).mode & 0o777) === 0o600 &&
+      JSON.parse(fs.readFileSync(policyFile)).changes.some(
+        (c) => c.actor === "admin:cyberclubadmin",
+      ),
+  );
+  check(
+    "当日额度重置保留操作记录",
+    JSON.parse(fs.readFileSync(ledgerPath)).resets.some(
+      (c) => c.target === actorKey(bobIdentity) && c.previousUsed === 4000000,
+    ),
+  );
   console.log(`邀请码、创作者 AI 与个人额度：${passed} 项通过`);
   fs.rmSync(root, { recursive: true, force: true });
   mock.close();

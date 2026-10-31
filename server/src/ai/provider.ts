@@ -105,7 +105,7 @@ export async function complete(
   signal?: AbortSignal,
   kind: UsageKind = "edit",
 ) {
-  await ensureBudget(s);
+  if (requestIdentity.getStore()?.role !== "admin") await ensureBudget(s);
   const reservation = await reserveUserTokens(
     Buffer.byteLength(JSON.stringify({ messages, tools })) + s.maxTokens + 1024,
   );

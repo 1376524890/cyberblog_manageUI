@@ -9,7 +9,15 @@
     active: boolean;
     builtin: boolean;
     createdAt?: string;
-    quota: { used: number; remaining: number; limit: number };
+    quota: {
+      used: number;
+      reserved: number;
+      remaining: number | null;
+      limit: number | null;
+      unlimited: boolean;
+      customLimit: boolean;
+      defaultLimit: number;
+    };
   }
   interface Invite {
     id: string;
@@ -22,6 +30,8 @@
   let users: User[] = [],
     invites: Invite[] = [],
     generated: Invite[] = [];
+  let limits: Record<string, number | undefined> = {};
+  let pendingReset: string | null = null;
   let count = 1,
     days = 7,
     busy = false,
@@ -43,6 +53,9 @@
         "/admin/accounts",
       );
       users = r.users;
+      limits = Object.fromEntries(
+        users.map((u) => [u.id, u.quota.limit ?? undefined]),
+      );
       invites = r.invites.reverse();
     } catch (e) {
       error = messageOf(e);
@@ -101,6 +114,53 @@
       busy = false;
     }
   }
+  async function saveLimit(user: User, restore = false) {
+    const limit = limits[user.id];
+    if (
+      busy ||
+      (!restore &&
+        (limit === undefined ||
+          !Number.isSafeInteger(limit) ||
+          limit < 0 ||
+          limit > 1_000_000_000))
+    )
+      return;
+    busy = true;
+    error = "";
+    message = "";
+    try {
+      const quota = await api.put<User["quota"]>(
+        `/admin/users/${user.id}/quota`,
+        { limit: restore ? null : limit },
+      );
+      users = users.map((u) => (u.id === user.id ? { ...u, quota } : u));
+      limits = { ...limits, [user.id]: quota.limit ?? undefined };
+      message = `已${restore ? "恢复" : "调整"} ${user.username} 的每日额度：${quota.limit?.toLocaleString()} token`;
+    } catch (e) {
+      error = messageOf(e);
+    } finally {
+      busy = false;
+    }
+  }
+  async function resetQuota(user: User) {
+    if (busy) return;
+    busy = true;
+    error = "";
+    message = "";
+    try {
+      const quota = await api.post<User["quota"]>(
+        `/admin/users/${user.id}/quota/reset`,
+        {},
+      );
+      users = users.map((u) => (u.id === user.id ? { ...u, quota } : u));
+      message = `已重置 ${user.username} 的今日用量`;
+    } catch (e) {
+      error = messageOf(e);
+    } finally {
+      busy = false;
+      pendingReset = null;
+    }
+  }
   async function copy(text: string, label = "邀请码") {
     try {
       await navigator.clipboard.writeText(text);
@@ -117,8 +177,8 @@
     <div class="eyebrow">ADMIN / ACCOUNTS</div>
     <h1>账号与邀请码</h1>
     <p class="muted">
-      邀请创作者注册独立账号，每人每天 300 万
-      token，额度按北京时间每日零点重置。
+      管理员不限额；创作者默认每日 300 万
+      token，可调整每日额度或重置今日用量。北京时间零点自动重置。
     </p>
   </div>
   <button disabled={busy || loading} on:click={load}>刷新</button>
@@ -171,8 +231,8 @@
         <thead
           ><tr
             ><th>账号</th><th>身份</th><th>状态</th><th>今日已用 token</th><th
-              >今日可用 token</th
-            ><th>操作</th></tr
+              >每日额度</th
+            ><th>今日可用 token</th><th>操作</th></tr
           ></thead
         ><tbody
           >{#each users as user}<tr
@@ -182,15 +242,71 @@
                   >{/if}</td
               ><td>{user.role === "admin" ? "管理员" : "创作者"}</td><td
                 >{user.active ? "启用" : "已停用"}</td
-              ><td>{user.quota.used.toLocaleString()}</td><td
-                >{user.quota.remaining.toLocaleString()}</td
               ><td
-                >{#if !user.builtin}<button
-                    class:danger={user.active}
-                    disabled={busy}
-                    on:click={() => toggle(user)}
-                    >{user.active ? "停用" : "启用"}</button
-                  >{:else}<span class="hint">环境配置管理</span>{/if}</td
+                >{user.quota.used.toLocaleString()}{#if user.quota.reserved}<small
+                    class="hint"
+                    >（处理中 {user.quota.reserved.toLocaleString()}）</small
+                  >{/if}</td
+              ><td>
+                {#if user.quota.unlimited}<span class="badge">不限额</span
+                  >{:else}<div class="quota-edit">
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000000000"
+                      step="1"
+                      aria-label={`${user.username} 的每日 token 额度`}
+                      bind:value={limits[user.id]}
+                    /><button
+                      disabled={busy ||
+                        limits[user.id] === undefined ||
+                        !Number.isSafeInteger(limits[user.id]) ||
+                        limits[user.id]! < 0 ||
+                        limits[user.id]! > 1000000000 ||
+                        limits[user.id] === user.quota.limit}
+                      on:click={() => saveLimit(user)}>保存额度</button
+                    >
+                  </div>
+                  <small class="hint"
+                    >{user.quota.customLimit ? "自定义额度" : "默认额度"} · 0 表示暂停
+                    AI</small
+                  >{/if}
+              </td><td
+                >{user.quota.unlimited
+                  ? "不限额"
+                  : user.quota.remaining?.toLocaleString()}</td
+              ><td
+                ><div class="quota-actions">
+                  {#if !user.quota.unlimited}<button
+                      disabled={busy}
+                      on:click={() => (pendingReset = user.id)}
+                      >重置今日用量</button
+                    >{#if user.quota.customLimit}<button
+                        disabled={busy}
+                        on:click={() => saveLimit(user, true)}
+                        >恢复默认额度</button
+                      >{/if}{/if}
+                  {#if pendingReset === user.id}<div
+                      class="reset-confirm"
+                      role="group"
+                      aria-label={`确认重置 ${user.username} 的用量`}
+                    >
+                      <small>清零今日已用额度，保留处理中请求。</small><button
+                        class="primary"
+                        disabled={busy}
+                        on:click={() => resetQuota(user)}>确认重置</button
+                      ><button
+                        disabled={busy}
+                        on:click={() => (pendingReset = null)}>取消</button
+                      >
+                    </div>{/if}
+                  {#if !user.builtin}<button
+                      class:danger={user.active}
+                      disabled={busy}
+                      on:click={() => toggle(user)}
+                      >{user.active ? "停用" : "启用"}</button
+                    >{:else}<span class="hint">环境配置管理</span>{/if}
+                </div></td
               ></tr
             >{/each}</tbody
         >
@@ -225,6 +341,28 @@
 </section>
 
 <style>
+  .reset-confirm {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid #dfe5f1;
+    border-radius: 6px;
+  }
+  .quota-edit,
+  .quota-actions {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .quota-edit input {
+    width: 135px;
+  }
+  .quota-actions button {
+    white-space: nowrap;
+  }
   .panel {
     margin-bottom: 22px;
   }

@@ -5,8 +5,9 @@
   let quota: {
     used: number;
     reserved: number;
-    remaining: number;
-    limit: number;
+    remaining: number | null;
+    limit: number | null;
+    unlimited: boolean;
     estimated: number;
   } | null = null;
   let error = "";
@@ -31,19 +32,28 @@
 
 {#if compact}<small class="quota-inline"
     >{quota
-      ? `今日剩余 ${quota.remaining.toLocaleString()} / ${quota.limit.toLocaleString()} token`
+      ? quota.unlimited
+        ? `管理员不限额 · 今日已用 ${quota.used.toLocaleString()} token`
+        : `今日剩余 ${quota.remaining?.toLocaleString()} / ${quota.limit?.toLocaleString()} token`
       : error || "正在读取个人额度…"}</small
   >
 {:else}<section class="panel quota">
     <div class="panel-head"><h2>我的每日额度</h2></div>
     <div class="panel-body">
-      {#if quota}<strong>{quota.remaining.toLocaleString()}</strong><span
-          >剩余 token / 每日 {quota.limit.toLocaleString()}</span
-        ><progress
-          max={quota.limit}
-          value={Math.min(quota.limit, quota.used + quota.reserved)}
-          aria-label="今日 token 用量"
-        ></progress><small
+      {#if quota}<strong
+          >{quota.unlimited
+            ? "不限额"
+            : quota.remaining?.toLocaleString()}</strong
+        ><span
+          >{quota.unlimited
+            ? "管理员不受 token 额度限制"
+            : `剩余 token / 每日 ${quota.limit?.toLocaleString()}`}</span
+        >
+        {#if !quota.unlimited && quota.limit !== null}<progress
+            max={Math.max(1, quota.limit)}
+            value={Math.min(quota.limit, quota.used + quota.reserved)}
+            aria-label="今日 token 用量"
+          ></progress>{/if}<small
           >今日已用 {quota.used.toLocaleString()}{#if quota.reserved}
             · 处理中预留 {quota.reserved.toLocaleString()}{/if}</small
         >{#if quota.estimated}<small
