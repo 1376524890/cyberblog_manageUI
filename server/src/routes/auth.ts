@@ -1,3 +1,5 @@
+import { registerAccount } from "../core/accounts.ts";
+import { bodyLimit } from "hono/body-limit";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createSession, authenticate, sessionCookie } from "../core/auth.ts";
@@ -19,6 +21,31 @@ function rateLimit(ip: string, max = 5, windowMs = 60_000) {
 }
 
 export const authRoutes = new Hono()
+  .use(
+    "*",
+    bodyLimit({
+      maxSize: 16384,
+      onError: (c) =>
+        c.json({ error: { code: "BODY_LIMIT", message: "登录信息过长" } }, 413),
+    }),
+  )
+  .post("/register", async (c) => {
+    const ip =
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    rateLimit(`register:${ip}`);
+    const identity = await registerAccount(await c.req.json());
+    const session = createSession(identity);
+    setCookieHeader(c, session.token);
+    return c.json(
+      {
+        ok: true,
+        token: session.token,
+        expiresAt: session.expiresAt,
+        user: identity,
+      },
+      201,
+    );
+  })
   .post("/login", async (c) => {
     const ip =
       c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";

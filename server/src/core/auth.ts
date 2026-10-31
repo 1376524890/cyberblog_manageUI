@@ -7,28 +7,16 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.ts";
+import { privateDir } from "./private-store.ts";
+import { registeredAccount } from "./accounts.ts";
+export { privateDir } from "./private-store.ts";
 
 export type Role = "admin" | "creator";
 export interface Identity {
   username: string;
   role: Role;
-}
-
-// Stored outside blog content so credentials and submissions can never be pushed.
-export function privateDir() {
-  const gitPath = path.join(config.repoPath, ".git");
-  const gitDir = fs.statSync(gitPath).isDirectory()
-    ? gitPath
-    : path.resolve(
-        config.repoPath,
-        fs
-          .readFileSync(gitPath, "utf8")
-          .trim()
-          .replace(/^gitdir: /, ""),
-      );
-  const dir = path.join(gitDir, "cms-private");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
+  userId?: string;
+  sessionVersion?: number;
 }
 
 export function ensureCreatorAccount(): string {
@@ -58,6 +46,17 @@ export function authenticate(
   username: string,
   password: string,
 ): Identity | null {
+  username = username.trim().toLowerCase();
+  const account = registeredAccount(username);
+  if (account)
+    return account.active && verifyPassword(password, account.passwordHash)
+      ? {
+          username,
+          role: "creator",
+          userId: account.id,
+          sessionVersion: account.sessionVersion,
+        }
+      : null;
   const role =
     username === config.adminUsername
       ? "admin"
@@ -118,6 +117,20 @@ export function verifySession(token: string | undefined): Identity | null {
       return { username: data.username, role: "admin" };
     if (data.role === "creator" && data.username === config.creatorUsername)
       return { username: data.username, role: "creator" };
+    if (data.role === "creator" && typeof data.userId === "string") {
+      const account = registeredAccount(data.username);
+      if (
+        account?.active &&
+        account.id === data.userId &&
+        account.sessionVersion === data.sessionVersion
+      )
+        return {
+          username: account.username,
+          role: "creator",
+          userId: account.id,
+          sessionVersion: account.sessionVersion,
+        };
+    }
     return null;
   } catch {
     return null;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isAdmin } from "../lib/api.ts";
   export let usage: {
     prompt_tokens?: number | null;
     completion_tokens?: number | null;
@@ -22,7 +23,7 @@
         : "合计 " + n(usage.total_tokens)} Tokens</span
     >{#if usage.unreported_requests}<span
         >{usage.unreported_requests} 次用量未上报</span
-      >{/if}<a href="#/ai-usage">用量明细 ↗</a>
+      >{/if}{#if isAdmin()}<a href="#/ai-usage">用量明细 ↗</a>{/if}
   </div>{/if}
 
 <style>

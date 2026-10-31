@@ -15,6 +15,7 @@ import {
   identityOf,
 } from "./middleware.ts";
 import { ensureCreatorAccount } from "./core/auth.ts";
+import { accountRoutes } from "./routes/accounts.ts";
 import { draftRoutes } from "./routes/drafts.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { collectionRoutes } from "./routes/collections.ts";
@@ -77,6 +78,7 @@ v1.use("*", async (c, next) => {
 });
 // /me 必须在 authMiddleware 之后注册（受保护）
 v1.get("/auth/me", (c) => c.json({ ...identityOf(c), expiresAt: null }));
+v1.route("/admin", accountRoutes);
 v1.route("/drafts", draftRoutes);
 v1.route("/posts", collectionRoutes("posts"));
 v1.route("/dynamic", collectionRoutes("dynamic"));
@@ -105,7 +107,9 @@ v1.route(
     const response = await app.request(`http://localhost/api/v1${url}`, {
       method,
       headers,
-      body: JSON.stringify(body),
+      ...(["GET", "HEAD"].includes(method)
+        ? {}
+        : { body: JSON.stringify(body) }),
     });
     return { status: response.status, data: await response.json() };
   }),

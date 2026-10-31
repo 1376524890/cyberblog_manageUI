@@ -2,6 +2,9 @@
   import { api } from "../lib/api.ts";
   import { messageOf } from "../lib/content.ts";
   import Icon from "../components/Icon.svelte";
+  let registering = location.hash.startsWith("#/register"),
+    inviteCode = "",
+    confirmPassword = "";
   let username = "",
     password = "",
     error = "",
@@ -12,8 +15,15 @@
     error = "";
     busy = true;
     try {
-      await api.post("/auth/login", { username, password });
-      location.hash = "/drafts";
+      if (registering && password !== confirmPassword)
+        throw new Error("两次输入的密码不一致");
+      await api.post(
+        registering ? "/auth/register" : "/auth/login",
+        registering
+          ? { username, password, inviteCode }
+          : { username, password },
+      );
+      location.hash = "/ai";
       location.reload();
     } catch (e) {
       error = messageOf(e);
@@ -47,14 +57,20 @@
   <section class="login-form">
     <form on:submit|preventDefault={login}>
       <div class="eyebrow">WELCOME BACK</div>
-      <h2>登录内容工作台</h2>
-      <p class="muted">新的灵感，从这里开始。</p>
+      <h2>{registering ? "注册创作者账号" : "登录内容工作台"}</h2>
+      <p class="muted">
+        {registering
+          ? "填写管理员提供的邀请码，开始独立创作。"
+          : "新的灵感，从这里开始。"}
+      </p>
       {#if error}<div class="err" role="alert">{error}</div>{/if}
       <label for="username">账号</label>
       <div class="password-field" style="margin-bottom: 20px">
         <input
           id="username"
-          placeholder="请输入账号"
+          placeholder={registering
+            ? "3–40 位字母、数字、下划线或短横线"
+            : "请输入账号"}
           autocomplete="username"
           required
           bind:value={username}
@@ -66,7 +82,9 @@
           id="admin-password"
           type={visible ? "text" : "password"}
           placeholder="请输入登录密码"
-          autocomplete="current-password"
+          autocomplete={registering ? "new-password" : "current-password"}
+          minlength={registering ? 12 : undefined}
+          maxlength={registering ? 128 : undefined}
           required
           bind:value={password}
         /><button
@@ -76,11 +94,57 @@
           >{visible ? "隐藏" : "显示"}</button
         >
       </div>
+      {#if registering}
+        <label for="confirm-password" style="margin-top:20px">确认密码</label>
+        <div class="password-field">
+          <input
+            id="confirm-password"
+            type="password"
+            autocomplete="new-password"
+            required
+            minlength="12"
+            maxlength="128"
+            placeholder="再次输入密码（至少 12 位）"
+            bind:value={confirmPassword}
+          />
+        </div>
+        <label for="invite-code" style="margin-top:20px">邀请码</label>
+        <div class="password-field">
+          <input
+            id="invite-code"
+            autocomplete="off"
+            required
+            placeholder="粘贴管理员提供的一次性邀请码"
+            bind:value={inviteCode}
+          />
+        </div>
+      {/if}
       <button
         class="primary submit"
         type="submit"
         disabled={busy || !username || !password}
-        >{busy ? "正在登录…" : "进入工作台"}<span>→</span></button
+        >{busy
+          ? registering
+            ? "正在注册…"
+            : "正在登录…"
+          : registering
+            ? "注册并进入工作台"
+            : "进入工作台"}<span>→</span></button
+      >
+      <button
+        type="button"
+        class="auth-toggle"
+        disabled={busy}
+        on:click={() => {
+          registering = !registering;
+          error = "";
+          password = "";
+          confirmPassword = "";
+          location.hash = registering ? "/register" : "/login";
+        }}
+        >{registering
+          ? "已有账号？返回登录"
+          : "收到邀请码？注册创作者账号"}</button
       >
       <div class="login-note">
         <span class="status-dot"></span>管理员审核发布 · 创作者投稿
@@ -93,6 +157,14 @@
 </div>
 
 <style>
+  .auth-toggle {
+    display: block;
+    margin: 18px auto 0;
+    border: 0;
+    background: none;
+    color: #6b7ec0;
+    font-size: 12px;
+  }
   .login-page {
     min-height: 100vh;
     display: grid;

@@ -8,6 +8,7 @@
     update: "更新内容",
     delete: "删除内容",
     publish: "推送发布",
+    submit: "提交审核",
   };
   const collections: Record<string, string> = {
     posts: "文章",
@@ -31,7 +32,13 @@
   <div class="card-heading">
     <span class="action-number">{proposal.number}</span>
     <div>
-      <strong>{labels[proposal.operation] ?? proposal.operation}</strong><small
+      <strong
+        >{proposal.scope === "draft" && proposal.operation === "create"
+          ? "创建私有草稿"
+          : proposal.scope === "draft" && proposal.operation === "update"
+            ? "更新私有草稿"
+            : (labels[proposal.operation] ?? proposal.operation)}</strong
+      ><small
         >{proposal.collection
           ? collections[proposal.collection] + " / " + proposal.slug
           : "博客内容仓库"}</small
@@ -97,9 +104,15 @@
             : "确认执行"}</button
       ><small>也可输入「确认执行 {proposal.number}」</small
       >{:else if proposal.state === "done"}<span class="receipt"
-        >✓ 已由管理接口完成，保存操作尚需推送才对博客生效。</span
+        >✓ {proposal.scope === "draft"
+          ? proposal.operation === "submit"
+            ? "已提交待发布，等待管理员审核。"
+            : "已保存为私有草稿。"
+          : "已由管理接口完成，保存操作尚需推送才对博客生效。"}</span
       >{/if}{#if proposal.collection && proposal.slug && proposal.operation !== "delete" && (proposal.operation !== "create" || proposal.state === "done")}<a
-        href={`#/${proposal.collection}/${encodeURIComponent(proposal.slug)}`}
+        href={proposal.scope === "draft"
+          ? `#/drafts/${proposal.draftId}`
+          : `#/${proposal.collection}/${encodeURIComponent(proposal.slug)}`}
         >在表单中查看 ↗</a
       >{/if}
   </div>

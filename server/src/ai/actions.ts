@@ -1,3 +1,4 @@
+import { actorKey } from "../core/request-context.ts";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +28,7 @@ const inputSchema = z
   })
   .strict();
 export interface Proposal {
+  owner?: string;
   id: string;
   operation: string;
   collection?: CollectionName;
@@ -52,7 +54,7 @@ const fingerprint = (p: {
     .update(JSON.stringify([p.data, p.extraFields, p.body]))
     .digest("hex");
 export function publicProposal(p: Proposal) {
-  const { version, fingerprint, head, ...publicPart } = p;
+  const { owner, version, fingerprint, head, ...publicPart } = p;
   return publicPart;
 }
 export async function propose(input: unknown) {
@@ -61,6 +63,7 @@ export async function propose(input: unknown) {
     throw new ApiError(422, "AI_ACTION_INVALID", "操作参数不符合约定");
   const r = parsed.data;
   const p: Proposal = {
+    owner: actorKey(),
     id: crypto.randomUUID(),
     operation: r.operation,
     collection: r.collection,
@@ -184,6 +187,7 @@ async function audit(p: Proposal, ok: boolean) {
   await fs.appendFile(
     auditPath,
     JSON.stringify({
+      actor: p.owner,
       id: p.id,
       time: new Date().toISOString(),
       operation: p.operation,
@@ -194,15 +198,16 @@ async function audit(p: Proposal, ok: boolean) {
     { mode: 0o600 },
   );
 }
-export async function history() {
+export async function history(owner?: string) {
   try {
     const content = await fs.readFile(auditPath, "utf8");
     return content
-      .trim()
       .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => !owner || record.actor === owner)
       .slice(-50)
-      .reverse()
-      .map((line) => JSON.parse(line));
+      .reverse();
   } catch (e: any) {
     if (e.code === "ENOENT") return [];
     throw new ApiError(500, "AI_AUDIT_READ", "操作记录读取失败");
@@ -217,7 +222,7 @@ export async function apply(
   ) => Promise<{ status: number; data: any }>,
 ) {
   const p = proposals.get(id);
-  if (!p)
+  if (!p || p.owner !== actorKey())
     throw new ApiError(
       404,
       "AI_ACTION_MISSING",

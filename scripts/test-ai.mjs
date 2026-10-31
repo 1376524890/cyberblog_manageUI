@@ -157,7 +157,12 @@ async function chat() {
 }
 let r = await req("GET", "/ai/settings");
 check("AI 设置需要认证", r.status === 401);
-token = (await req("POST", "/auth/login", { username: "cyberclubadmin", password: "admin123" })).data.token;
+token = (
+  await req("POST", "/auth/login", {
+    username: "cyberclubadmin",
+    password: "admin123",
+  })
+).data.token;
 r = await req("POST", "/ai/edit", { mode: "format", body: "x" });
 check("未配置 AI 时清楚提示", r.status === 409);
 const settings = {
@@ -378,7 +383,13 @@ r = await req("POST", "/projects", {
 });
 check("成员链接拒绝脚本协议", r.status === 422);
 // Internal proposal checks do not invoke a provider.
-const { propose } = await import("../server/src/ai/actions.ts");
+const { propose: rawPropose } = await import("../server/src/ai/actions.ts");
+const { requestIdentity } =
+  await import("../server/src/core/request-context.ts");
+const propose = (input) =>
+  requestIdentity.run({ username: "cyberclubadmin", role: "admin" }, () =>
+    rawPropose(input),
+  );
 const create = await propose({
   operation: "create",
   collection: "projects",

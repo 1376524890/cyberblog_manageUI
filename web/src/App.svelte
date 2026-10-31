@@ -10,6 +10,7 @@
   } from "./lib/api.ts";
   import { collections, type Collection, messageOf } from "./lib/content.ts";
   import Icon from "./components/Icon.svelte";
+  import Accounts from "./pages/Accounts.svelte";
   import DraftList from "./pages/DraftList.svelte";
   import Login from "./pages/Login.svelte";
   import PostList from "./pages/PostList.svelte";
@@ -39,27 +40,29 @@
     Object.keys(collections).includes(section) ? section : "posts"
   ) as Collection;
   $: pageTitle =
-    section === "drafts"
-      ? admin
-        ? "投稿审核"
-        : "我的草稿"
-      : section === "github-daily"
-        ? "GitHub 日报"
-        : section === "ai"
-          ? "AI 工作台"
-          : section === "ai-usage"
-            ? "Token 用量"
-            : section === "ai-settings"
-              ? "AI 设置"
-              : section === "overview"
-                ? "工作台"
-                : section === "series"
-                  ? "系列管理"
-                  : section === "publish"
-                    ? "发布中心"
-                    : collections[collection].label;
+    section === "accounts"
+      ? "账号与邀请码"
+      : section === "drafts"
+        ? admin
+          ? "投稿审核"
+          : "我的草稿"
+        : section === "github-daily"
+          ? "GitHub 日报"
+          : section === "ai"
+            ? "AI 工作台"
+            : section === "ai-usage"
+              ? "Token 用量"
+              : section === "ai-settings"
+                ? "AI 设置"
+                : section === "overview"
+                  ? "工作台"
+                  : section === "series"
+                    ? "系列管理"
+                    : section === "publish"
+                      ? "发布中心"
+                      : collections[collection].label;
   async function refresh() {
-    if (!authed || !admin) return;
+    if (!authed || user.role !== "admin") return;
     try {
       const s = await api.get<{
         pendingPushCount: number;
@@ -112,7 +115,7 @@
         setCurrentUser(identity);
         if (
           identity.role === "creator" &&
-          !["drafts", "new"].includes(currentRoute().split("/")[1])
+          !["drafts", "new", "ai"].includes(currentRoute().split("/")[1])
         ) {
           location.hash = "/drafts";
           route = "/drafts";
@@ -164,6 +167,9 @@
             ><Icon name="series" />系列管理</a
           >
           <div class="nav-label">站点与助手</div>
+          <a class:active={section === "accounts"} href="#/accounts"
+            ><Icon name="users" />账号与邀请码</a
+          >
           <a class:active={section === "github-daily"} href="#/github-daily"
             ><Icon name="activity" />GitHub 日报</a
           >
@@ -179,6 +185,9 @@
               >{/if}</a
           >
         {:else}
+          <a class:active={section === "ai"} href="#/ai"
+            ><Icon name="sparkles" />AI 工作台</a
+          >
           <div class="nav-label">选择现有板块投稿</div>
           {#each Object.entries(collections) as [key, value]}<a
               href={`#/drafts/new?collection=${key}`}
@@ -238,9 +247,10 @@
                 slug="new"
               />
             {:else}<DraftList {admin} />{/if}
+          {:else if section === "ai"}<AIWorkspace />
           {:else if !admin}<DraftList {admin} />
           {:else if section === "github-daily"}<GitHubDaily />
-          {:else if section === "ai"}<AIWorkspace />
+          {:else if section === "accounts"}<Accounts />
           {:else if section === "ai-usage"}<AIUsage
             />{:else if section === "ai-settings"}<AISettings />
           {:else if section === "overview"}<Overview />

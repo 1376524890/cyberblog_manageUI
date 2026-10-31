@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PersonalQuota from "./PersonalQuota.svelte";
   import TokenUsage from "./TokenUsage.svelte";
   import { createEventDispatcher, onDestroy } from "svelte";
   import { api, isAdmin } from "../lib/api.ts";
@@ -54,6 +55,7 @@
       error = messageOf(e);
     } finally {
       if (id === generation) busy = false;
+      window.dispatchEvent(new Event("cms:ai-used"));
     }
   }
   function apply(append = false) {
@@ -93,6 +95,7 @@
   <button class="ai-toggle" on:click={() => (open = !open)}
     >✦ AI 编辑助手 <span>{open ? "收起" : "排版 · 创作 · 润色"}</span></button
   >{#if open}<div class="ai-editor-body">
+      <PersonalQuota compact />
       <div class="action-row">
         <select aria-label="AI 编辑任务" bind:value={mode} disabled={busy}
           >{#each modes as m}<option value={m.value}>{m.label}</option

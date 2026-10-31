@@ -196,9 +196,7 @@ try {
     ["DELETE", "/posts/existing/images/file.png", {}],
     ["GET", "/ai/settings"],
     ["PUT", "/ai/settings", {}],
-    ["GET", "/ai/history"],
     ["GET", "/ai/usage"],
-    ["POST", "/ai/chat", {}],
     ["POST", "/ai/actions/unknown/apply", {}],
     ["POST", "/ai/daily/run", {}],
     ["PATCH", "/posts/existing", {}],
@@ -210,6 +208,14 @@ try {
     );
   for (const url of ["/meta", "/series", "/templates"])
     check(`创作者可读取 ${url}`, (await req("GET", url)).status === 200);
+  check(
+    "创作者 AI 工作台可读取个人状态",
+    (await req("GET", "/ai/status")).status === 200,
+  );
+  check(
+    "创作者可读取个人 AI 操作历史",
+    (await req("GET", "/ai/history")).status === 200,
+  );
   const initialHead = git(["rev-parse", "HEAD"]);
   const create = content();
   create.owner = "cyberclubadmin";

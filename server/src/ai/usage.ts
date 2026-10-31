@@ -11,6 +11,8 @@ export interface Tokens {
   reasoning: number | null;
 }
 export interface UsageRecord extends Tokens {
+  actor?: string;
+  username?: string;
   id: string;
   time: string;
   model: string;
@@ -30,8 +32,9 @@ export function normalizeUsage(usage: any): Tokens {
     input,
     output,
     total:
-      count(usage?.total_tokens) ??
-      (input !== null && output !== null ? input + output : null),
+      input !== null && output !== null
+        ? Math.max(count(usage?.total_tokens) ?? 0, input + output)
+        : count(usage?.total_tokens),
     cached: count(
       usage?.prompt_tokens_details?.cached_tokens ??
         usage?.input_tokens_details?.cached_tokens,

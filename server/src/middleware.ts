@@ -1,3 +1,4 @@
+import { requestIdentity } from "./core/request-context.ts";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { config } from "./config.ts";
@@ -16,7 +17,7 @@ export function authMiddleware() {
       throw new ApiError(401, "UNAUTHORIZED", "未认证或会话过期");
     }
     c.set("identity", identity);
-    await next();
+    await requestIdentity.run(identity, next);
   };
 }
 
@@ -59,8 +60,19 @@ export function roleMiddleware() {
     const method = c.req.method;
     const allowed =
       (method === "GET" &&
-        ["/auth/me", "/meta", "/series", "/templates"].includes(route)) ||
-      (method === "POST" && ["/slug-preview", "/ai/edit"].includes(route)) ||
+        [
+          "/auth/me",
+          "/meta",
+          "/series",
+          "/templates",
+          "/ai/status",
+          "/ai/quota",
+          "/ai/history",
+        ].includes(route)) ||
+      (method === "POST" &&
+        ["/slug-preview", "/ai/edit", "/ai/chat"].includes(route)) ||
+      (method === "POST" &&
+        /^\/ai\/actions\/[a-f0-9-]{36}\/apply$/.test(route)) ||
       ((method === "GET" || method === "POST" || method === "PUT") &&
         /^\/drafts(?:\/|$)/.test(route));
     if (!allowed) throw new ApiError(403, "FORBIDDEN", "此操作仅限管理员");

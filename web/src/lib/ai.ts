@@ -1,5 +1,7 @@
 import { writable } from "svelte/store";
 export interface Proposal {
+  scope?: "draft";
+  draftId?: string;
   id: string;
   operation: string;
   collection?: string;

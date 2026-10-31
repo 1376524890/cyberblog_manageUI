@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
-  import { api, contentSaved } from "../lib/api.ts";
+  import { api, contentSaved, isAdmin } from "../lib/api.ts";
   import { messageOf } from "../lib/content.ts";
   import { conversation, chatRequest, type Proposal } from "../lib/ai.ts";
+  import PersonalQuota from "../components/PersonalQuota.svelte";
   import TokenUsage from "../components/TokenUsage.svelte";
   import ActionCard from "../components/ActionCard.svelte";
   import Icon from "../components/Icon.svelte";
@@ -27,12 +28,20 @@
   $: pending = $conversation
     .flatMap((t) => t.proposals ?? [])
     .filter((p) => p.state === "pending");
-  const examples = [
-    "查看当前内容和待发布状态，给我下一步建议",
-    "我要添加一位新成员，请先问我需要哪些资料",
-    "规划 Python 教程下一篇，并准备一个草稿",
-    "帮我检查成员简介和社交链接是否完整",
-  ];
+  const admin = isAdmin();
+  const examples = admin
+    ? [
+        "查看当前内容和待发布状态，给我下一步建议",
+        "我要添加一位新成员，请先问我需要哪些资料",
+        "规划 Python 教程下一篇，并准备一个草稿",
+        "帮我检查成员简介和社交链接是否完整",
+      ]
+    : [
+        "查看我的草稿，帮我安排下一步创作",
+        "为社团活动准备一篇动态草稿，先问我需要哪些信息",
+        "查询现有分类，帮我规划一篇技术文章草稿",
+        "检查我的草稿并准备提交管理员审核",
+      ];
   function update(p: Proposal, patch: Partial<Proposal>) {
     conversation.update((turns) =>
       turns.map((t) => ({
@@ -55,13 +64,19 @@
     executing = true;
     update(p, { state: "running" });
     try {
-      await api.post(`/ai/actions/${encodeURIComponent(p.id)}/apply`, {});
-      update(p, { state: "done" });
+      const result = await api.post<{ id?: string }>(
+        `/ai/actions/${encodeURIComponent(p.id)}/apply`,
+        {},
+      );
+      update(p, {
+        state: "done",
+        ...(p.scope === "draft" ? { draftId: result.id } : {}),
+      });
       conversation.update((t) => [
         ...t,
         {
           role: "assistant",
-          text: `操作 ${p.number} 已执行：${p.operation} ${p.collection ?? ""}/${p.slug ?? ""}。${p.operation === "publish" ? "推送已完成，等待博客构建。" : "修改已保存到仓库，尚需推送才对博客生效。"}`,
+          text: `操作 ${p.number} 已执行：${p.operation} ${p.collection ?? ""}/${p.slug ?? ""}。${p.scope === "draft" ? (p.operation === "submit" ? "已进入待发布队列，等待管理员审核。" : "已保存为私有草稿，可在「我的草稿」继续编辑。") : p.operation === "publish" ? "推送已完成，等待博客构建。" : "修改已保存到仓库，尚需推送才对博客生效。"}`,
         },
       ]);
       contentSaved();
@@ -103,7 +118,9 @@
       return;
     }
     if (!enabled) {
-      error = "请先在 AI 设置中配置并启用模型。";
+      error = admin
+        ? "请先在 AI 设置中配置并启用模型。"
+        : "模型暂未启用，请联系管理员。";
       return;
     }
     busy = true;
@@ -147,6 +164,7 @@
       busy = false;
       progress = "";
       controller = null;
+      window.dispatchEvent(new Event("cms:ai-used"));
     }
   }
   function useExample(value: string) {
@@ -159,7 +177,7 @@
   }
   onMount(() => {
     void api
-      .get<{ enabled: boolean; hasKey: boolean; model: string }>("/ai/settings")
+      .get<{ enabled: boolean; hasKey: boolean; model: string }>("/ai/status")
       .then((s) => {
         enabled = s.enabled && s.hasKey;
         model = s.model;
@@ -174,12 +192,16 @@
 <div class="page-heading">
   <div>
     <div class="eyebrow">AI / CONTENT COPILOT</div>
-    <h1>用对话，管理你的内容。</h1>
-    <p class="muted">从一个想法到一次发布，助手陪你把每一步准备好。</p>
+    <h1>{admin ? "用对话，管理你的内容。" : "用对话，把想法写成草稿。"}</h1>
+    <p class="muted">
+      {admin
+        ? "从一个想法到一次发布，助手陪你把每一步准备好。"
+        : "助手可以查询和编辑你的草稿，提交后由管理员审核发布。"}
+    </p>
   </div>
-  <a class="button" href="#/ai-settings"
-    ><Icon name="settings" size={16} />模型与连接</a
-  >
+  {#if admin}<a class="button" href="#/ai-settings"
+      ><Icon name="settings" size={16} />模型与连接</a
+    >{/if}
 </div>
 <div class="ai-workspace">
   <section class="chat-panel panel">
@@ -199,14 +221,18 @@
       {#if !$conversation.length}<div class="chat-welcome">
           <div class="welcome-spark">✦</div>
           <h2>把你想做的事，告诉我。</h2>
-          <p>查找文章、创建成员、整理排版，或准备下一次更新。</p>
+          <p>
+            {admin
+              ? "查找文章、创建成员、整理排版，或准备下一次更新。"
+              : "查询自己的草稿、参考模板创作，或准备提交审核。"}
+          </p>
           <div class="prompt-grid">
             {#each examples as example}<button
                 on:click={() => useExample(example)}
                 >{example}<span>↗</span></button
               >{/each}
           </div>
-          {#if settingsLoaded && !enabled}<a
+          {#if settingsLoaded && !enabled && admin}<a
               class="configure-link"
               href="#/ai-settings">首次使用，先连接你的模型服务 →</a
             >{/if}
@@ -265,6 +291,7 @@
     </div>
   </section>
   <aside class="ai-side">
+    <PersonalQuota />
     <section class="panel">
       <div class="panel-head"><h2>助手可以做什么</h2></div>
       <div class="capabilities">
@@ -290,7 +317,10 @@
         </div>
         <div>
           <Icon name="publish" size={18} /><span
-            ><strong>准备发布</strong><small>核对待推送记录，再确认执行</small
+            ><strong>{admin ? "准备发布" : "提交审核"}</strong><small
+              >{admin
+                ? "核对待推送记录，再确认执行"
+                : "稿件提交待发布，由管理员审核"}</small
             ></span
           >
         </div>

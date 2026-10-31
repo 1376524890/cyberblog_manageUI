@@ -1,3 +1,5 @@
+import { reserveUserTokens, settleUserTokens } from "./quota.ts";
+import { actorKey, requestIdentity } from "../core/request-context.ts";
 import { ApiError } from "../core/errors.ts";
 import { readSettings, validateEndpoint, type AISettings } from "./settings.ts";
 import {
@@ -104,6 +106,9 @@ export async function complete(
   kind: UsageKind = "edit",
 ) {
   await ensureBudget(s);
+  const reservation = await reserveUserTokens(
+    Buffer.byteLength(JSON.stringify({ messages, tools })) + s.maxTokens + 1024,
+  );
   const started = Date.now();
   let rawUsage: unknown = null;
   let ok = false;
@@ -121,7 +126,8 @@ export async function complete(
         [s.tokenParameter ?? "max_tokens"]: s.maxTokens,
         // DeepSeek Flash enables extended thinking by default; editorial requests
         // need their output budget for article text and structured illustrations.
-        ...(kind === "daily" && /^(deepseek-flash|deepseek-v4-pro)$/i.test(s.model)
+        ...(kind === "daily" &&
+        /^(deepseek-flash|deepseek-v4-pro)$/i.test(s.model)
           ? { thinking: { type: "disabled" } }
           : {}),
         ...(tools ? { tools, tool_choice: "auto" } : {}),
@@ -158,7 +164,20 @@ export async function complete(
       });
     throw e;
   } finally {
+    const tokens = normalizeUsage(rawUsage);
+    const definitiveRejection = [
+      "AI_AUTH_ERROR",
+      "AI_ENDPOINT_OR_MODEL",
+      "AI_PROVIDER_RATE_LIMIT",
+      "AI_PARAMETERS_UNSUPPORTED",
+    ].includes(errorCode ?? "");
+    await settleUserTokens(
+      reservation,
+      tokens.total ?? (definitiveRejection ? 0 : null),
+    );
     await recordUsage({
+      actor: actorKey(),
+      username: requestIdentity.getStore()?.username,
       ...normalizeUsage(rawUsage),
       model: s.model,
       provider: new URL(s.baseUrl).origin,

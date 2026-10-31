@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
+import type { Identity } from "../core/auth.ts";
 import { privateDir } from "../core/auth.ts";
 import { identityOf } from "../middleware.ts";
 import { ApiError } from "../core/errors.ts";
@@ -68,7 +69,7 @@ async function save(draft: Draft) {
   await atomicWrite(file(draft.id), JSON.stringify(draft));
   await fs.chmod(file(draft.id), 0o600);
 }
-async function payload(raw: unknown, c: any) {
+export async function validateDraftInput(raw: unknown, identity: Identity) {
   const parsed = input.safeParse(raw);
   if (!parsed.success)
     throw new ApiError(422, "VALIDATION_FAILED", "请检查板块、文件标识和正文", {
@@ -84,7 +85,7 @@ async function payload(raw: unknown, c: any) {
   p.data = checked.data;
   delete p.data.draft;
   delete p.data.pinned;
-  if (identityOf(c).role === "creator" && p.collection === "posts") {
+  if (identity.role === "creator" && p.collection === "posts") {
     const posts = await listCollection("posts");
     for (const key of ["category", "series"]) {
       const value = p.data[key];
@@ -147,7 +148,7 @@ export const draftRoutes = new Hono()
     });
   })
   .post("/", async (c) => {
-    const p = await payload(await c.req.json(), c);
+    const p = await validateDraftInput(await c.req.json(), identityOf(c));
     const now = new Date().toISOString();
     const d: Draft = {
       ...p,
@@ -171,7 +172,7 @@ export const draftRoutes = new Hono()
       throw new ApiError(422, "VALIDATION_FAILED", "缺少稿件版本");
     current(d, v.data.revision);
     editable(d);
-    const p = await payload(raw, c);
+    const p = await validateDraftInput(raw, identityOf(c));
     if (p.collection !== d.collection)
       throw new ApiError(403, "FORBIDDEN", "稿件创建后不能切换板块");
     const next: Draft = { ...d, ...p };
