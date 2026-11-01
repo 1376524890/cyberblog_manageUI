@@ -403,7 +403,7 @@ check(
 );
 const durable = await featuredHistory(dir);
 check("Feature ledger survives service restart", durable.length === 10);
-assert.throws(() => selectUnfeatured(ranking, durable), /只有2个/);
+assert.equal(selectUnfeatured(ranking, durable).length, 2);
 checks++;
 check(
   "Rename identified by stable repository ID",
@@ -412,17 +412,19 @@ check(
   ]),
 );
 const blocked = new DailyService(dir, deps);
-blocked.setWriter(async () => {
-  throw Error("Should not write");
-});
+let partialDraft;
+blocked.setWriter(async (draft) => { partialDraft = draft; });
 now = new Date("2026-11-01T00:00:00Z");
 await blocked.configure(true);
 await blocked.tick();
 await blocked.wait();
 check(
-  "Insufficient fresh candidates fail without recycling or partial draft",
-  (await blocked.status()).runs[0].state === "failed" &&
-    (await featuredHistory(dir)).length === 10,
+  "Two remaining fresh candidates produce a complete smaller edition",
+  (await blocked.status()).runs[0].state === "done" &&
+    partialDraft.githubRepos.length === 2 &&
+    partialDraft.assets.length === 2 &&
+    (await blocked.status()).runs[0].quality.projects === 2 &&
+    (await featuredHistory(dir)).length === 12,
 );
 const failureDir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-failed-"),
@@ -630,9 +632,13 @@ const rejectedBeforeRetry = rejects;
 await exhaustedService.start();
 await exhaustedService.wait();
 check(
-  "Retry remembers today's rejected candidates instead of repeating failed research",
+  "Retry respects the daily research budget and remembers earlier rejections",
   rejects === rejectedBeforeRetry,
 );
+const rejectedAfterRetry = rejects;
+await exhaustedService.start();
+await exhaustedService.wait();
+check("Exhausted day never repeats rejected research", rejects === rejectedAfterRetry && exhaustedWrites === 0);
 const recoveredSpaceDir = await fs.mkdtemp(
   path.join(
     path.dirname(process.env.CMS_AI_ENV_FILE),
@@ -668,5 +674,53 @@ check(
   recoveredWrites === 1 &&
     (await recoveredSpace.status()).runs[0].state === "done",
 );
+
+// Boundary matrix: actual daily pool of 1..4, with matching figures and metadata.
+for (let count = 1; count <= 4; count++) {
+  check("Parser accepts " + count + " daily candidates",
+    parseTrending(html.match(/<article[\s\S]*?<\/article>/g).slice(0, count).join("")).length === count);
+  const smallDir = await fs.mkdtemp(path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-small-"));
+  let draft;
+  const small = new DailyService(smallDir, {...deps, trending: async () => ranking.slice(0, count)});
+  small.setWriter(async d => { draft = d; });
+  await small.start(); await small.wait();
+  check("Edition with " + count + " projects saves matching text and PNGs",
+    (await small.status()).runs[0].state === "done" &&
+    (await small.status()).runs[0].quality.projects === count &&
+    (await small.status()).runs[0].quality.figures === count &&
+    draft.githubRepos.length === count && draft.assets.length === count &&
+    (draft.body.match(/^## /gm) ?? []).length === count &&
+    draft.data.description.includes(count + " 个开源项目"));
+}
+for (const [pool, good] of [[5, 3], [12, 1]]) {
+  const mixedDir = await fs.mkdtemp(path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-mixed-"));
+  let draft, researched = 0;
+  const mixed = new DailyService(mixedDir, {...deps,
+    trending: async () => ranking.slice(0, pool),
+    generate: async source => {
+      researched++;
+      if (Number(source.name.match(/repo(\d+)/)[1]) >= good)
+        throw new ApiError(422, "DAILY_EDITORIAL_REVIEW", "未通过审稿");
+      return {model: "mock", analysis: makeAnalysis()};
+    }});
+  mixed.setWriter(async d => { draft = d; });
+  await mixed.start(); await mixed.wait();
+  const run = (await mixed.status()).runs[0];
+  check("Qualified subset saved at candidate exhaustion or research budget " + pool,
+    run.state === "done" && draft.githubRepos.length === good &&
+    run.quality.projects === good && researched <= 10 &&
+    run.ranking.every((r, i) => r.rank === i + 1) &&
+    (await featuredHistory(mixedDir)).length === good);
+}
+const emptyDir = await fs.mkdtemp(path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-empty-"));
+let emptyCalls = 0;
+const empty = new DailyService(emptyDir, {...deps, trending: async () => [],
+  generate: async () => { emptyCalls++; throw Error("unexpected"); },
+  overview: async () => { emptyCalls++; throw Error("unexpected"); }});
+empty.setWriter(async () => { emptyCalls++; });
+await empty.start(); await empty.wait();
+check("Zero candidates skip model calls, writing and featured history",
+  emptyCalls === 0 && (await empty.status()).runs[0].state === "failed" &&
+  (await featuredHistory(emptyDir)).length === 0);
 console.log(`Daily regression: ${checks} checks passed`);
 process.exit(0);

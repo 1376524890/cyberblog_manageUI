@@ -143,11 +143,11 @@ export function selectUnfeatured(
     });
     if (selected.length === count) break;
   }
-  if (selected.length < count)
+  if (selected.length === 0)
     throw new ApiError(
       409,
       "DAILY_NEW_PROJECTS_INSUFFICIENT",
-      `当天榜单中未介绍过的项目只有${selected.length}个，不重复选题凑数，稍后自动重试`,
+      `当天榜单没有未介绍过的新项目，本次不生成文章，稍后自动重试`,
     );
   return selected;
 }

@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "qualified-candidates-resumable-png-v9",
+  version: "qualified-candidates-flexible-png-v10",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [
@@ -90,7 +90,7 @@ export function composeBlogDraft(
       title: `GitHub 每日开源精选 · ${date}`,
       published: date,
       draft: true,
-      description: `介绍 ${names} 五个开源项目，讲解实际用途、使用方法与代码结构。`,
+      description: `介绍 ${names} 等 ${projects.length} 个开源项目，讲解实际用途、使用方法与代码结构。`,
       category: "技术分享",
       series: DAILY_SERIES,
       seriesOrder: dailySeriesOrder(date),
@@ -109,12 +109,17 @@ export function checkBlogDraft(
   const fail = (message: string): never => {
     throw new ApiError(422, "DAILY_QUALITY", message);
   };
-  if (projects.length !== 5 || projects.some((p, i) => p.source.rank !== i + 1))
-    fail("五个项目的顺序或数量不完整");
+  if (
+    projects.length < 1 ||
+    projects.length > 5 ||
+    projects.some((p, i) => p.source.rank !== i + 1)
+  )
+    fail("项目数量应为 1 至 5 个，且顺序连续");
   if (draft.data.draft !== true || draft.data.password)
     fail("日报必须保存为无密码草稿");
   const text = draft.body.replace(/```[\s\S]*?```/g, "");
-  if ((text.match(/^## /gm) ?? []).length !== 5) fail("博客项目标题结构不完整");
+  if ((text.match(/^## /gm) ?? []).length !== projects.length)
+    fail("博客项目标题结构不完整");
   if (
     /```(?:mermaid|svg|html)\b|本次读取的源码|阅读与复核说明|本文由 CMS|未进行完整审计|未执行仓库代码/i.test(
       draft.body,
@@ -122,15 +127,15 @@ export function checkBlogDraft(
   )
     fail("正文仍含不需要的报告模板或嵌入式图表");
   if (
-    draft.assets.length !== 5 ||
-    new Set(draft.assets.map((a) => a.name)).size !== 5
+    draft.assets.length !== projects.length ||
+    new Set(draft.assets.map((a) => a.name)).size !== projects.length
   )
     fail("架构图片数量或文件名不完整");
   const refs = [
     ...text.matchAll(/!\[[^\]]*\]\(\.\/images\/([^/]+)\/([^)]*\.png)\)/g),
   ];
   if (
-    refs.length !== 5 ||
+    refs.length !== projects.length ||
     refs.some(
       (r) => r[1] !== draft.slug || !draft.assets.some((a) => a.name === r[2]),
     )
@@ -158,8 +163,8 @@ export function checkBlogDraft(
   return {
     workflowVersion: DAILY_WORKFLOW.version,
     passed: true,
-    projects: 5,
-    figures: 5,
+    projects: projects.length,
+    figures: draft.assets.length,
     bodyCharacters: draft.body.length,
   };
 }

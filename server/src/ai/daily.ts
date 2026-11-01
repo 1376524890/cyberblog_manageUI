@@ -426,11 +426,13 @@ export class DailyService {
         headline: string;
         opening: string;
       }[] = [];
-      for (let repo of run.ranking) {
+      candidateLoop: for (let repo of run.ranking) {
         while (true) {
+          if (projects.length + run.skipped!.length >= 10)
+            break candidateLoop;
           try {
             currentProject = repo.name;
-            run.progress = `分析 ${repo.rank}/5：${repo.name}`;
+            run.progress = `分析 ${repo.rank}/${run.ranking!.length}：${repo.name}`;
             await this.persist();
             const evPath = path.join(cacheDir, `${repo.rank}-source-v5.json`);
             const projectDir = path.join(
@@ -494,7 +496,7 @@ export class DailyService {
             }
             try {
               result ??= await this.deps.generate(ev, async (text) => {
-                run.progress = `${repo.rank}/5 ${repo.name} · ${text}`;
+                run.progress = `${repo.rank}/${run.ranking!.length} ${repo.name} · ${text}`;
                 await this.persist();
                 await writeJSON(evPath, ev);
               });
@@ -588,15 +590,12 @@ export class DailyService {
               (r) => !blocked.has(canonicalRepo(r.name)),
             );
             const needed = 5 - projects.length;
+            // Keep every qualified project when the candidate pool or research budget is exhausted.
             if (
-              remaining.length < needed ||
+              remaining.length === 0 ||
               projects.length + run.skipped!.length >= 10
             )
-              throw new ApiError(
-                422,
-                "DAILY_QUALIFIED_PROJECTS_INSUFFICIENT",
-                "当天可用候选尚未凑齐五个通过审稿的新项目，已保存研究结果与未入选原因，稍后重试",
-              );
+              break candidateLoop;
             run.ranking!.splice(
               projects.length,
               needed,
@@ -618,6 +617,12 @@ export class DailyService {
           }
         }
       }
+      if (projects.length === 0)
+        throw new ApiError(
+          422,
+          "DAILY_QUALIFIED_PROJECTS_INSUFFICIENT",
+          "当天没有通过审稿的新项目，本次不生成文章，已保留研究结果与未入选原因",
+        );
       projects.sort(
         (a, b) =>
           (a.source.trendingRank ?? a.source.rank) -
@@ -648,7 +653,7 @@ export class DailyService {
         )) ?? (await this.deps.overview(run.date, introductions));
       await writeJSON(editionPath, { key: editionKey, edition });
       const draft = composeBlogDraft(run.date, projects, edition, assets);
-      run.progress = "检查正文、标题和五张配图";
+      run.progress = `检查正文、标题和 ${projects.length} 张配图`;
       await this.persist();
       const quality = checkBlogDraft(draft, projects);
       history = await featuredHistory(
@@ -875,7 +880,7 @@ export async function generateOverview(
     [
       {
         role: "system",
-        content: `为一篇介绍五个开源项目的中文博客写标题、开篇与结尾。用自然、有具体内容的技术博客语言，自然引出各自的用途，不强行概括共同理念，避免套话。没有AI功能的项目不要归类为AI代理，也不要把所有项目都说成模型产品。不要报告口吻、方法说明、免责声明、AI身份或生成流程。不再逐项复述正文。只返回JSON {"title":"标题，含日期但不夸张","lead":"约150至250字的开篇","closing":"约100至180字的自然收尾"}。${DAILY_WRITING_BRIEF}`,
+        content: `为一篇介绍 ${projects.length} 个开源项目的中文博客写标题、开篇与结尾。用自然、有具体内容的技术博客语言，自然引出各自的用途，不强行概括共同理念，避免套话。没有AI功能的项目不要归类为AI代理，也不要把所有项目都说成模型产品。不要报告口吻、方法说明、免责声明、AI身份或生成流程。不再逐项复述正文。只返回JSON {"title":"标题，含日期但不夸张","lead":"约150至250字的开篇","closing":"约100至180字的自然收尾"}。${DAILY_WRITING_BRIEF}`,
       },
       { role: "user", content: JSON.stringify({ date, projects }) },
     ],

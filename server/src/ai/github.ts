@@ -63,11 +63,11 @@ export function parseTrending(html: string): RankedRepo[] {
     });
     if (out.length === 30) break;
   }
-  if (out.length < 5)
+  if (out.length === 0)
     throw new ApiError(
       502,
       "GITHUB_RANKING",
-      "GitHub 日榜格式变化或不足 5 项，已停止生成，未使用替代榜单",
+      "GitHub 日榜为空或格式变化，本次不生成文章，未使用替代榜单",
     );
   return out;
 }
