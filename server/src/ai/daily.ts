@@ -282,7 +282,7 @@ export class DailyService {
         for (const run of this.state.runs)
           if (run.state === "running") {
             run.state = "failed";
-            run.error = "服务重启中断，可重试，已生成草稿不会覆盖";
+            run.error = "服务重启中断，可重试，已生成文章不会覆盖";
             run.finishedAt = this.deps.now().toISOString();
           }
         this.initialized = true;
@@ -313,7 +313,7 @@ export class DailyService {
           ".runtime/storage-maintenance.json",
         ),
       ).catch(() => null),
-      draftOnly: true,
+      draftOnly: false,
       workflow: DAILY_WORKFLOW,
     };
   }
@@ -333,7 +333,7 @@ export class DailyService {
       const date = dayInShanghai(now);
       const existing = this.state.runs.find((r) => r.date === date);
       if (existing?.state === "done")
-        return { started: false, reason: "今日草稿已生成，不会重复创建或覆盖" };
+        return { started: false, reason: "今日文章已生成，不会重复创建或覆盖" };
       if (!this.writer)
         throw new ApiError(503, "DAILY_NOT_READY", "日报写入器尚未就绪");
       const run: Run = {
@@ -377,7 +377,7 @@ export class DailyService {
       if (current.some((h) => h.slug === slug)) {
         run.state = "done";
         run.slug = slug;
-        run.progress = "当日草稿已存在，保留现有内容";
+        run.progress = "当日文章已存在，保留现有内容";
         return;
       }
       let snapshot = await readJSON<{
@@ -641,7 +641,7 @@ export class DailyService {
           projects.findIndex((p) => p.source.name === b.name),
       );
       currentProject = undefined;
-      run.progress = "撰写开篇与收尾，保存图文草稿";
+      run.progress = "撰写开篇与收尾，保存图文文章";
       await this.persist();
       const editionKey = run.ranking
         .map((r) => canonicalRepo(r.name))
@@ -691,7 +691,7 @@ export class DailyService {
       run.quality = quality;
       run.state = "done";
       run.slug = draft.slug;
-      run.progress = "草稿已保存，等待人工审核；未推送或发布";
+      run.progress = "文章已保存，未推送或发布";
     } catch (e) {
       run.failure = {
         project: currentProject,

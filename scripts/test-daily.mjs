@@ -272,8 +272,8 @@ check(
   scanned.filter((h) => h.slug === post.slug).length === 5,
 );
 check(
-  "Draft is private until review and has no password",
-  post.data.draft === true && !post.data.password,
+  "Daily article is publish-ready (not draft) and has no password",
+  post.data.draft === false && !post.data.password,
 );
 check(
   "Article contains five PNG embeds and no report template",
@@ -365,8 +365,8 @@ const scheduled = await fetch(base + "/posts/github-daily-2026-10-31", {
   headers,
 }).then((r) => r.json());
 check(
-  "Scheduled run saves a real illustrated draft through the same API",
-  scheduled.data.draft === true &&
+  "Scheduled run saves a real illustrated article through the same API",
+  scheduled.data.draft === false &&
     (scheduled.body.match(/!\[/g) ?? []).length === 5,
 );
 check(

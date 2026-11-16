@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "qualified-candidates-flexible-png-v10",
+  version: "qualified-candidates-flexible-png-v11",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [
@@ -16,7 +16,7 @@ export const DAILY_WORKFLOW = {
     "生成架构图片",
     "审阅内容与主流程",
     "检查图文完整性",
-    "保存为草稿",
+    "保存文章",
   ],
 };
 export const DAILY_SERIES = "GitHub每日精选";
@@ -89,7 +89,7 @@ export function composeBlogDraft(
     data: {
       title: `GitHub 每日开源精选 · ${date}`,
       published: date,
-      draft: true,
+      draft: false,
       description: `介绍 ${names} 等 ${projects.length} 个开源项目，讲解实际用途、使用方法与代码结构。`,
       category: "技术分享",
       series: DAILY_SERIES,
@@ -115,8 +115,8 @@ export function checkBlogDraft(
     projects.some((p, i) => p.source.rank !== i + 1)
   )
     fail("项目数量应为 1 至 5 个，且顺序连续");
-  if (draft.data.draft !== true || draft.data.password)
-    fail("日报必须保存为无密码草稿");
+  if (draft.data.draft || draft.data.password)
+    fail("日报必须保存为无密码的非草稿文章");
   const text = draft.body.replace(/```[\s\S]*?```/g, "");
   if ((text.match(/^## /gm) ?? []).length !== projects.length)
     fail("博客项目标题结构不完整");
@@ -143,7 +143,7 @@ export function checkBlogDraft(
     fail("正文配图引用与保存图片不一致");
   for (const project of projects) {
     if (!project.source.corePlan || !project.source.semanticReview?.passed)
-      fail("核心链路审稿尚未通过，不能保存草稿");
+      fail("核心链路审稿尚未通过，不能保存文章");
     if (
       project.analysis.paragraphs.length < 5 ||
       project.analysis.paragraphs.join("").length < 750

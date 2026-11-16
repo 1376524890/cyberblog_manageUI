@@ -53,7 +53,7 @@
     try {
       state = await api.put<Status>("/ai/daily", { enabled: !state.enabled });
       message = state.enabled
-        ? "已开启每天 08:00 生成，完成后仅保存草稿。"
+        ? "已开启每天 08:00 自动生成，完成后保存为可发布文章。"
         : "已暂停后续自动生成；进行中的任务会完成。";
     } catch (e) {
       error = messageOf(e);
@@ -107,14 +107,14 @@
       <h2>北京时间 · 每天 08:00</h2>
       <p>下一次计划：{time(state.nextRunAt)}</p>
       <p class="muted">
-        任务在服务器运行，关闭浏览器不影响执行。仅创建草稿，不推送、不公开发布。
+        任务在服务器运行，关闭浏览器不影响执行。保存后默认不勾选草稿，推送与发布仍由人工确认。
       </p>
     </div>
     <div class="daily-buttons">
       <button disabled={busy} on:click={toggle}
         >{state.enabled ? "暂停自动生成" : "开启自动生成"}</button
       ><button class="primary" disabled={busy || state.running} on:click={run}
-        >{state.running ? "正在生成…" : "生成今日草稿 / 重试"}</button
+        >{state.running ? "正在生成…" : "生成今日文章 / 重试"}</button
       >
     </div>
   </section>
@@ -126,7 +126,7 @@
           </li>{/each}
       </ol>
       <p class="muted">
-        手动生成与定时任务共用同一流程，图文检查通过后保存为草稿。
+        手动生成与定时任务共用同一流程，图文检查通过后保存为非草稿文章。
       </p>
     </section>{/if}
   <div class="daily-grid">
@@ -138,7 +138,7 @@
         >
       </p>
       <p class="muted">
-        按日榜顺序选取最多五个尚未介绍的项目，跳过已有草稿、已发布文章和历史记录；合格项目不足五个时按实际数量生成，为零时不生成文章。逐个读取固定提交的
+        按日榜顺序选取最多五个尚未介绍的项目，跳过已生成文章、已发布文章和历史记录；合格项目不足五个时按实际数量生成，为零时不生成文章。逐个读取固定提交的
         README、清单和关键源码样本；不安装或执行仓库代码。
       </p>
     </section>
@@ -157,20 +157,20 @@
   <section class="panel daily-card">
     <h2>运行记录</h2>
     <p class="muted">
-      每日去重，已生成的草稿不会被重跑覆盖。失败最多自动重试 2 次，间隔至少 10
+      每日去重，已生成的文章不会被重跑覆盖。失败最多自动重试 2 次，间隔至少 10
       分钟；服务恢复后补跑当天遗漏的任务。
     </p>
-    {#if !state.runs.length}<p>尚无运行记录。开启计划或先生成今日草稿。</p>{/if}
+    {#if !state.runs.length}<p>尚无运行记录。开启计划或先生成今日文章。</p>{/if}
     {#each state.runs as run}<article class="daily-run">
         <div class="daily-run-title">
           <strong>{run.date}</strong><span class="daily-badge"
             >{run.state === "done"
-              ? "草稿已生成"
+              ? "文章已生成"
               : run.state === "failed"
                 ? "生成失败"
                 : "正在生成"}</span
           >{#if run.slug}<a class="button" href={`#/posts/${run.slug}`}
-              >查看草稿 ↗</a
+              >查看文章 ↗</a
             >{/if}
         </div>
         <p>{run.progress}</p>
