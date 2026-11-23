@@ -313,6 +313,8 @@ service.setWriter(async (draft) => {
     body: JSON.stringify({ ...draft, commit: true }),
   });
   assert.equal(r.status, 201);
+  const publication = await fetch(base + "/git", { method: "POST", headers });
+  assert.equal(publication.status, 200);
 });
 const starts = await Promise.all([
   service.start(),
@@ -398,11 +400,11 @@ check(
 );
 
 check(
-  "Creation did not push",
+  "Daily generation automatically pushes its commit",
   execFileSync("git", ["rev-parse", "origin/main"], {
     cwd: process.env.CMS_REPO_PATH,
     encoding: "utf8",
-  }).trim() === originBefore,
+  }).trim() !== originBefore,
 );
 check("Completed day cannot run again", !(await service.start()).started);
 const restored = new DailyService(dir, deps);
@@ -419,6 +421,8 @@ restored.setWriter(async (draft) => {
     body: JSON.stringify({ ...draft, commit: true }),
   });
   assert.equal(response.status, 201);
+  const publication = await fetch(base + "/git", { method: "POST", headers });
+  assert.equal(publication.status, 200);
 });
 await restored.tick();
 await restored.wait();

@@ -691,7 +691,7 @@ export class DailyService {
       run.quality = quality;
       run.state = "done";
       run.slug = draft.slug;
-      run.progress = "文章已保存，未推送或发布";
+      run.progress = "文章已保存并自动推送";
     } catch (e) {
       run.failure = {
         project: currentProject,

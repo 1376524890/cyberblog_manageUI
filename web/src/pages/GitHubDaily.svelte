@@ -53,7 +53,7 @@
     try {
       state = await api.put<Status>("/ai/daily", { enabled: !state.enabled });
       message = state.enabled
-        ? "已开启每天 08:00 自动生成，完成后保存为可发布文章。"
+        ? "已开启每天 08:00 自动生成，完成后保存为非草稿文章并自动推送。"
         : "已暂停后续自动生成；进行中的任务会完成。";
     } catch (e) {
       error = messageOf(e);
@@ -91,7 +91,7 @@
     <p class="eyebrow">GITHUB / DAILY</p>
     <h1>每天，读懂值得关注的开源项目</h1>
     <p class="muted">
-      从 GitHub 日榜到源码与结构图，让 AI 完成初稿，你来决定何时发布。
+      从 GitHub 日榜到源码与结构图，AI 完成文章后自动推送发布。
     </p>
   </div>
   <a class="button" href="#/ai">前往 AI 工作台 ↗</a>
@@ -107,7 +107,7 @@
       <h2>北京时间 · 每天 08:00</h2>
       <p>下一次计划：{time(state.nextRunAt)}</p>
       <p class="muted">
-        任务在服务器运行，关闭浏览器不影响执行。保存后默认不勾选草稿，推送与发布仍由人工确认。
+        任务在服务器运行，关闭浏览器不影响执行。生成文章默认不勾选草稿，保存后自动推送触发前台构建。
       </p>
     </div>
     <div class="daily-buttons">

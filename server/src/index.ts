@@ -173,11 +173,27 @@ serve(
   },
 );
 
-// Delegated automation is deliberately restricted to a single daily draft create.
-// It reuses Agent proposals and the authenticated, serialized content API.
+// Delegated automation is deliberately restricted to daily article publication.
+// It reuses Agent proposals and the authenticated, serialized content and Git APIs.
 daily.setWriter(async (draft) => {
+  const token = createSession({
+    username: config.adminUsername,
+    role: "admin",
+  }).token;
   try {
     await getOne("posts", draft.slug);
+    const response = await app.request("http://localhost/api/v1/git", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status >= 400)
+      throw new ApiError(
+        response.status,
+        "DAILY_PUSH_FAILED",
+        `日报自动推送失败：${
+          (await response.json()).error?.message ?? response.status
+        }`,
+      );
     return { existing: true };
   } catch (e) {
     if (!(e instanceof ApiError) || e.status !== 404) throw e;
@@ -188,13 +204,9 @@ daily.setWriter(async (draft) => {
     slug: draft.slug,
     data: draft.data,
     body: draft.body,
-    reason: "管理员授权的 GitHub 每日 Top 5 草稿任务",
+    reason: "管理员授权的 GitHub 日报自动发布任务",
   });
-  const token = createSession({
-    username: config.adminUsername,
-    role: "admin",
-  }).token;
-  return apply(p.id, async (method, url, body) => {
+  const result = await apply(p.id, async (method, url, body) => {
     if (method !== "POST" || url !== "/posts")
       throw new Error("Draft creation only");
     const response = await app.request(`http://localhost/api/v1${url}`, {
@@ -211,6 +223,19 @@ daily.setWriter(async (draft) => {
     });
     return { status: response.status, data: await response.json() };
   });
+  const response = await app.request("http://localhost/api/v1/git", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status >= 400)
+    throw new ApiError(
+      response.status,
+      "DAILY_PUSH_FAILED",
+      `日报自动推送失败：${
+        (await response.json()).error?.message ?? response.status
+      }`,
+    );
+  return result;
 });
 if (process.env.CMS_DAILY_SCHEDULER !== "off") {
   const tick = () => {

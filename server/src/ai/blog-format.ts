@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "qualified-candidates-flexible-png-v12",
+  version: "qualified-candidates-auto-publish-v13",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [
@@ -16,7 +16,7 @@ export const DAILY_WORKFLOW = {
     "生成架构图片",
     "审阅内容与主流程",
     "检查图文完整性",
-    "保存文章",
+    "保存非草稿文章并自动推送",
   ],
 };
 export const DAILY_SERIES = "GitHub每日精选";
