@@ -27,10 +27,32 @@ const escape = (s: string) =>
       })[c]!,
   );
 const colors = {
-  entry: ["#eef0ff", "#7569d5", "入口与交互"],
-  core: ["#e7f7f3", "#25877c", "核心模块"],
-  support: ["#fff4e6", "#b47c35", "数据与支撑"],
+  entry: ["#e8e8e6", "#565b6b", "入口与交互"],
+  core: ["#ffffff", "#565b6b", "核心模块"],
+  support: ["#ececea", "#565b6b", "数据与支撑"],
 };
+const palette = {
+  paper: "#f5f5f5",
+  paper2: "#efefed",
+  ink: "#2d3142",
+  muted: "#5c5f6d",
+  rule: "rgba(45,49,66,0.20)",
+  accent: "#bf4520",
+  accentTint: "rgba(191,69,32,0.10)",
+};
+const snap = (value: number) => Math.ceil(value / 4) * 4;
+interface DiagramLabel {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  size: number;
+  color: string;
+  bold?: boolean;
+  background?: boolean;
+  maxHeight?: number;
+  center?: boolean;
+}
 let fontPromise: Promise<string> | null = null;
 export async function diagramFont() {
   if (!fontPromise)
@@ -77,182 +99,204 @@ export async function diagramFont() {
     });
   return fontPromise;
 }
+export function buildArchitectureSVG(repo: string, a: Architecture) {
+  const width = 960;
+  const cardW = 284;
+  const cardH = 104;
+  const gapX = 24;
+  const marginX = 48;
+  const top = 104;
+  const rowGap = 60;
+  const layers = ["entry", "core", "support"] as const;
+  const layerNames = {
+    entry: "ENTRY / INTERACTION",
+    core: "CORE / DOMAIN",
+    support: "SUPPORT / DATA",
+  };
+  const rows = layers
+    .map((layer) => {
+      const indexes = a.nodes
+        .map((n, i) => (n.layer === layer ? i : -1))
+        .filter((i) => i >= 0);
+      return Array.from(
+        { length: Math.ceil(indexes.length / 3) },
+        (_, row) => indexes.slice(row * 3, row * 3 + 3),
+      );
+    })
+    .flat();
+  const rowTops = rows.map((_, index) => top + index * (cardH + rowGap));
+  const positions = new Map<number, { x: number; y: number; row: number }>();
+  rows.forEach((indexes, row) => {
+    const span =
+      indexes.length * cardW +
+      (indexes.length > 1 ? (indexes.length - 1) * gapX : 0);
+    indexes.forEach((index, column) => {
+      positions.set(index, {
+        x: snap(
+          marginX + (width - marginX * 2 - span) / 2 + column * (cardW + gapX),
+        ),
+        y: rowTops[row],
+        row,
+      });
+    });
+  });
+  const bodyHeight =
+    rows.length * cardH + Math.max(0, rows.length - 1) * rowGap;
+  const height = snap(Math.max(600, top + bodyHeight + 52));
+  const geometries: string[] = [];
+  const labels: DiagramLabel[] = [
+    {
+      text: "GITHUB DAILY / ARCHITECTURE",
+      x: marginX,
+      y: 28,
+      width: 480,
+      size: 10,
+      color: palette.muted,
+      bold: true,
+    },
+    {
+      text: repo,
+      x: marginX,
+      y: 48,
+      width: 720,
+      size: 28,
+      color: palette.ink,
+      bold: true,
+      maxHeight: 36,
+    },
+    {
+      text: a.diagramTitle,
+      x: marginX,
+      y: 88,
+      width: 760,
+      size: 13,
+      color: palette.muted,
+      maxHeight: 24,
+    },
+  ];
+  geometries.push(
+    `<line x1="${marginX}" y1="80" x2="${width - marginX}" y2="80" stroke="${palette.rule}" stroke-width="1"/>`,
+  );
+
+  for (const [edgeIndex, edge] of a.edges.entries()) {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) continue;
+    let path = "";
+    let labelX = 0;
+    let labelY = 0;
+    const source = { x: from.x + cardW / 2, y: from.y + cardH };
+    const target = { x: to.x + cardW / 2, y: to.y - 7 };
+    if (from.row === to.row) {
+      const x1 = from.x + cardW;
+      const x2 = to.x;
+      const y = from.y + cardH / 2 + ((edgeIndex % 3) - 1) * 20;
+      path = `M ${x1} ${y} H ${x2 - 7}`;
+      labelX = (x1 + x2) / 2 - 100;
+      labelY = y - 14;
+    } else if (to.y > from.y) {
+      const midY = snap((source.y + target.y) / 2);
+      path = `M ${source.x} ${source.y} V ${midY} H ${target.x} V ${target.y}`;
+      labelX = target.x - 100;
+      labelY = midY - 15;
+    } else {
+      const side = Math.min(
+        width - 20,
+        from.x + cardW + 16 + (edgeIndex % 3) * 20,
+      );
+      path = `M ${from.x + cardW} ${from.y + cardH / 2} H ${side} V ${target.y + cardH / 2} H ${to.x + cardW + 7}`;
+      labelX = (side + to.x + cardW) / 2 - 100;
+      labelY = target.y + cardH / 2 - 14;
+    }
+    geometries.push(
+      `<path d="${path}" fill="none" stroke="${palette.ink}" stroke-opacity="0.66" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#arrow)"/>`,
+    );
+    if (edge.label)
+      labels.push({
+        text: edge.label,
+        x: Math.round(labelX),
+        y: Math.round(labelY),
+        width: 200,
+        size: 12,
+        color: palette.muted,
+        background: true,
+        center: true,
+        maxHeight: 18,
+      });
+  }
+
+  let firstCore = true;
+  rows.forEach((indexes, row) => {
+    const layer = a.nodes[indexes[0]]?.layer ?? "core";
+    const y = rowTops[row] - 28;
+    const rowBottom = rowTops[row] + cardH + 20;
+    geometries.push(
+      `<rect data-layer="${layer}" data-role="tier" x="${marginX}" y="${y}" width="${width - marginX * 2}" height="${rowBottom - y}" rx="8" fill="${palette.paper2}" fill-opacity="${layer === "support" ? 0.55 : 0.38}" stroke="${palette.rule}" stroke-dasharray="4,3"/>`,
+    );
+    labels.push({
+      text: layerNames[layer],
+      x: marginX + 16,
+      y: y + 7,
+      width: 260,
+      size: 10,
+      color: palette.muted,
+      bold: true,
+    });
+    indexes.forEach((index) => {
+      const node = a.nodes[index];
+      const position = positions.get(index)!;
+      const focal = layer === "core" && firstCore;
+      const fill = focal ? palette.accentTint : colors[layer][0];
+      const stroke = focal ? palette.accent : colors[layer][1];
+      geometries.push(
+        `<rect data-node-index="${index}" data-role="${focal ? "focal" : "node"}" x="${position.x}" y="${position.y}" width="${cardW}" height="${cardH}" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="${focal ? 1.2 : 1}"/>`,
+      );
+      labels.push(
+        {
+          text: node.label,
+          x: position.x + 16,
+          y: position.y + 15,
+          width: cardW - 32,
+          size: 14,
+          color: palette.ink,
+          bold: true,
+          maxHeight: 22,
+        },
+        {
+          text: node.description,
+          x: position.x + 16,
+          y: position.y + 42,
+          width: cardW - 32,
+          size: 11,
+          color: palette.muted,
+          maxHeight: 31,
+        },
+        {
+          text:
+            node.path.length > 44
+              ? "…/" + node.path.split("/").slice(-2).join("/").slice(-40)
+              : node.path,
+          x: position.x + 16,
+          y: position.y + 79,
+          width: cardW - 32,
+          size: 12,
+          color: focal ? palette.accent : palette.muted,
+          maxHeight: 20,
+        },
+      );
+      if (focal) firstCore = false;
+    });
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" data-grammar="architecture" data-source="diagram-design"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${palette.ink}" fill-opacity="0.75"/></marker></defs><rect width="${width}" height="${height}" fill="${palette.paper}"/>${geometries.join("")}</svg>`;
+  return { svg, width, height, labels };
+}
+
 export async function renderArchitecturePNG(
   repo: string,
   a: Architecture,
 ): Promise<Buffer> {
   const font = await diagramFont();
-  const width = 1800,
-    cardW = 470,
-    cardH = 188,
-    gapX = 76,
-    gapY = 156;
-  const rows: { layer: keyof typeof colors; indexes: number[] }[] = [];
-  for (const layer of ["entry", "core", "support"] as const) {
-    const indexes = a.nodes
-      .map((n, i) => (n.layer === layer ? i : -1))
-      .filter((i) => i >= 0);
-    for (let start = 0; start < indexes.length; start += 3)
-      rows.push({ layer, indexes: indexes.slice(start, start + 3) });
-  }
-  const height =
-    264 + rows.length * cardH + Math.max(0, rows.length - 1) * gapY + 74;
-  const positions = new Map<number, { x: number; y: number; row: number }>();
-  rows.forEach((row, r) => {
-    const span = row.indexes.length * cardW + (row.indexes.length - 1) * gapX;
-    row.indexes.forEach((i, c) =>
-      positions.set(i, {
-        x: Math.round((width - span) / 2 + c * (cardW + gapX)),
-        y: 264 + r * (cardH + gapY),
-        row: r,
-      }),
-    );
-  });
-  const geometries: string[] = [];
-  const labels: {
-    text: string;
-    x: number;
-    y: number;
-    width: number;
-    size: number;
-    color: string;
-    bold?: boolean;
-    background?: boolean;
-    maxHeight?: number;
-    center?: boolean;
-  }[] = [];
-  labels.push({
-    text: "OPEN SOURCE  /  CODE ARCHITECTURE",
-    x: 72,
-    y: 38,
-    width: 1500,
-    size: 16,
-    color: "#65728c",
-    bold: true,
-  });
-  labels.push({
-    text: repo,
-    x: 72,
-    y: 80,
-    width: 1620,
-    size: 46,
-    color: "#1b2941",
-    bold: true,
-    maxHeight: 70,
-  });
-  labels.push({
-    text: a.diagramTitle,
-    x: 74,
-    y: 157,
-    width: 1590,
-    size: 24,
-    color: "#58667f",
-    maxHeight: 45,
-  });
-  geometries.push(
-    `<path d="M72 218 H1728" stroke="#dfe5ef" stroke-width="2"/>`,
-  );
-  for (const [i, e] of a.edges.entries()) {
-    const from = positions.get(e.from)!,
-      to = positions.get(e.to)!;
-    let d = "",
-      labelX = 0,
-      labelY = 0;
-    if (from.row === to.row) {
-      const y = from.y - 32 - (i % 3) * 28;
-      const x1 = from.x + cardW / 2,
-        x2 = to.x + cardW / 2;
-      d = `M${x1} ${from.y} V${y} H${x2} V${to.y - 8}`;
-      labelX = (x1 + x2) / 2 - 120;
-      labelY = y - 18;
-    } else if (from.row < to.row) {
-      const x1 = from.x + cardW / 2 + ((i % 3) - 1) * 28;
-      const x2 = to.x + cardW / 2 + ((i % 3) - 1) * 28;
-      const y = from.y + cardH + 52 + (i % 3) * 36;
-      if (to.row === from.row + 1)
-        d = `M${x1} ${from.y + cardH} V${y} H${x2} V${to.y - 8}`;
-      else {
-        const side = width - 40 - (i % 3) * 22;
-        d = `M${x1} ${from.y + cardH} V${y} H${side} V${to.y - 58} H${x2} V${to.y - 8}`;
-      }
-      labelX = (x1 + x2) / 2 - 120;
-      labelY = y - 17;
-    } else {
-      const side = 34 + (i % 3) * 22;
-      d = `M${from.x} ${from.y + cardH / 2} H${side} V${to.y - 44} H${to.x + cardW / 2} V${to.y - 8}`;
-      labelX = (side + to.x + cardW / 2) / 2 - 120;
-      labelY = to.y - 63;
-    }
-    geometries.push(
-      `<path d="${d}" fill="none" stroke="#98a6bc" stroke-width="2.5" stroke-linejoin="round" marker-end="url(#arrow)"/>`,
-    );
-    if (e.label)
-      labels.push({
-        text: e.label,
-        x: Math.round(labelX),
-        y: Math.round(labelY),
-        width: 240,
-        size: 20,
-        color: "#53627c",
-        background: true,
-        center: true,
-        maxHeight: 30,
-      });
-  }
-  for (const row of rows) {
-    const palette = colors[row.layer];
-    const y = positions.get(row.indexes[0])!.y;
-    labels.push({
-      text: palette[2],
-      x: 76,
-      y: y - 33,
-      width: 180,
-      size: 20,
-      color: palette[1],
-      bold: true,
-    });
-    for (const index of row.indexes) {
-      const n = a.nodes[index],
-        p = positions.get(index)!;
-      geometries.push(
-        `<rect x="${p.x}" y="${p.y + 5}" width="${cardW}" height="${cardH}" rx="20" fill="#172a42" opacity=".055"/><rect x="${p.x}" y="${p.y}" width="${cardW}" height="${cardH}" rx="20" fill="white" stroke="${palette[1]}" stroke-opacity=".42" stroke-width="2"/><rect x="${p.x + 18}" y="${p.y + 20}" width="6" height="32" rx="3" fill="${palette[1]}"/>`,
-      );
-      labels.push({
-        text: n.label,
-        x: p.x + 38,
-        y: p.y + 22,
-        width: cardW - 62,
-        size: 28,
-        color: "#23354d",
-        bold: true,
-        maxHeight: 42,
-      });
-      labels.push({
-        text: n.description,
-        x: p.x + 26,
-        y: p.y + 70,
-        width: cardW - 52,
-        size: 20,
-        color: "#64748b",
-        maxHeight: 56,
-      });
-      labels.push({
-        text:
-          n.path.length > 52
-            ? "…/" + n.path.split("/").slice(-2).join("/").slice(-48)
-            : n.path,
-        x: p.x + 26,
-        y: p.y + 142,
-        width: cardW - 52,
-        size: 18,
-        color: palette[1],
-        maxHeight: 44,
-      });
-    }
-  }
-  const base = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#98a6bc"/></marker></defs><rect width="${width}" height="${height}" fill="#f6f8fc"/>${geometries.join("")}</svg>`,
-  );
+  const { svg, width, height, labels } = buildArchitectureSVG(repo, a);
   const overlays: sharp.OverlayOptions[] = [];
   for (const label of labels) {
     let size = label.size;
@@ -292,13 +336,23 @@ export async function renderArchitecturePNG(
             width: rendered.info.width + 16,
             height: rendered.info.height + 8,
             channels: 4,
-            background: "#f6f8fc",
+            background: palette.paper,
           },
         })
           .composite([{ input: rendered.data, left: 8, top: 4 }])
           .png()
           .toBuffer()
-      : rendered.data;
+      : await sharp({
+          create: {
+            width: rendered.info.width,
+            height: rendered.info.height,
+            channels: 4,
+            background: palette.paper,
+          },
+        })
+          .composite([{ input: rendered.data, left: 0, top: 0 }])
+          .png()
+          .toBuffer();
     overlays.push({
       input: text,
       left: Math.round(
@@ -309,8 +363,12 @@ export async function renderArchitecturePNG(
       top: label.y - (label.background ? 4 : 0),
     });
   }
-  return sharp(base)
+  const renderedCanvas = await sharp(Buffer.from(svg))
     .composite(overlays)
+    .png()
+    .toBuffer();
+  return sharp(renderedCanvas)
+    .resize(width * 2, height * 2)
     .png({ compressionLevel: 9 })
     .toBuffer();
 }

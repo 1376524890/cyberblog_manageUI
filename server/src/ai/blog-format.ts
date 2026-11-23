@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "qualified-candidates-flexible-png-v11",
+  version: "qualified-candidates-flexible-png-v12",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [

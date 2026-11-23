@@ -8,7 +8,10 @@ import {
 } from "../server/src/ai/dedup.ts";
 import { assertCoreDiagram } from "../server/src/ai/research.ts";
 import sharp from "../server/node_modules/sharp/lib/index.js";
-import { renderArchitecturePNG } from "../server/src/ai/architecture.ts";
+import {
+  buildArchitectureSVG,
+  renderArchitecturePNG,
+} from "../server/src/ai/architecture.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -120,6 +123,22 @@ const makeAnalysis = () => ({
   ],
   edges: [{ from: 0, to: 1, label: "调用", evidence: "src/main.ts" }],
 });
+const rendererAnalysis = {
+  ...makeAnalysis(),
+  nodes: [
+    ...makeAnalysis().nodes,
+    {
+      label: "存储模块",
+      path: "src/store.ts",
+      description: "保存任务结果",
+      layer: "support",
+    },
+  ],
+  edges: [
+    { from: 0, to: 1, label: "调用", evidence: "src/main.ts" },
+    { from: 1, to: 2, label: "保存", evidence: "src/lib.ts" },
+  ],
+};
 const ev = makeEvidence(ranking[0]);
 const planSource = makeEvidence(ranking[0]);
 planSource.corePlan.files.push({
@@ -183,11 +202,62 @@ assert.throws(() =>
   ),
 );
 checks++;
-const png = await renderArchitecturePNG("example/project", makeAnalysis());
+const png = await renderArchitecturePNG("example/project", rendererAnalysis);
 const metadata = await sharp(png).metadata();
+const svg = buildArchitectureSVG("example/project", rendererAnalysis);
 check(
-  "Architecture exported as a real high-resolution PNG",
-  metadata.format === "png" && metadata.width === 1800 && png.length > 10000,
+  "Architecture uses diagram-design editorial SVG structure",
+  svg.width === 960 &&
+    svg.height === 600 &&
+    (svg.svg.match(/data-layer="entry"/g) ?? []).length === 1 &&
+    (svg.svg.match(/data-layer="core"/g) ?? []).length === 1 &&
+    (svg.svg.match(/data-layer="support"/g) ?? []).length === 1 &&
+    (svg.svg.match(/data-role="focal"/g) ?? []).length === 1 &&
+    /stroke="#2d3142"/.test(svg.svg) &&
+    /(?:^| )H(?: |$)/.test(svg.svg) &&
+    !/filter=/.test(svg.svg),
+);
+check(
+  "Architecture exported as a two-times PNG",
+  metadata.format === "png" &&
+    metadata.width === 1920 &&
+    metadata.height === 1200 &&
+    png.length > 10000,
+);
+const nineNodeAnalysis = {
+  ...makeAnalysis(),
+  nodes: [
+    { label: "命令入口", path: "src/cli.ts", description: "解析命令并分发任务", layer: "entry" },
+    { label: "服务入口", path: "src/server.ts", description: "接收外部请求", layer: "entry" },
+    { label: "业务核心", path: "src/core.ts", description: "执行主要业务流程", layer: "core" },
+    { label: "规则引擎", path: "src/rules.ts", description: "计算规则与策略", layer: "core" },
+    { label: "任务队列", path: "src/queue.ts", description: "调度异步任务", layer: "core" },
+    { label: "存储层", path: "src/store.ts", description: "保存任务数据", layer: "support" },
+    { label: "缓存层", path: "src/cache.ts", description: "缓存热点结果", layer: "support" },
+    { label: "配置中心", path: "src/config.ts", description: "读取运行配置", layer: "support" },
+    { label: "日志模块", path: "src/log.ts", description: "记录执行轨迹", layer: "support" },
+  ],
+  edges: [
+    { from: 0, to: 2, label: "调用", evidence: "src/cli.ts" },
+    { from: 1, to: 2, label: "请求", evidence: "src/server.ts" },
+    { from: 2, to: 3, label: "求值", evidence: "src/core.ts" },
+    { from: 2, to: 4, label: "入队", evidence: "src/core.ts" },
+    { from: 4, to: 5, label: "写入", evidence: "src/queue.ts" },
+    { from: 3, to: 6, label: "读取", evidence: "src/rules.ts" },
+    { from: 2, to: 7, label: "配置", evidence: "src/core.ts" },
+    { from: 4, to: 8, label: "记录", evidence: "src/queue.ts" },
+  ],
+};
+const nineNodeSvg = buildArchitectureSVG("example/nine", nineNodeAnalysis);
+const nineNodePng = await renderArchitecturePNG("example/nine", nineNodeAnalysis);
+const nineNodeMetadata = await sharp(nineNodePng).metadata();
+check(
+  "Complex architecture expands height within asset limits",
+  nineNodeSvg.width === 960 &&
+    nineNodeSvg.height > 600 &&
+    nineNodeMetadata.width === 1920 &&
+    nineNodeMetadata.height === nineNodeSvg.height * 2 &&
+    nineNodeMetadata.height <= 3200,
 );
 
 const dir = await fs.mkdtemp(

@@ -306,7 +306,7 @@ export class DailyService {
       schedule: "每天 08:00",
       nextRunAt: this.state.enabled ? nextRun(this.deps.now()) : null,
       source: TRENDING,
-      diagramEngine: "PNG 架构图片（分层卡片布局）",
+      diagramEngine: "PNG 架构图片（diagram-design Architecture 规范）",
       storage: await readJSON<Record<string, unknown>>(
         path.join(
           path.dirname(settingsPath),
