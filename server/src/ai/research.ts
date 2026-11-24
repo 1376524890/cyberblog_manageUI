@@ -42,13 +42,34 @@ async function structured<T>(
 ): Promise<T> {
   const settings = await requireAI();
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await complete(
-      { ...settings, maxTokens: Math.min(settings.maxTokens, 4096) },
-      messages,
-      undefined,
-      undefined,
-      "daily",
-    );
+    let response;
+    try {
+      response = await complete(
+        { ...settings, maxTokens: Math.min(settings.maxTokens, 8192) },
+        messages,
+        undefined,
+        undefined,
+        "daily",
+      );
+    } catch (e) {
+      if (
+        e instanceof ApiError &&
+        (e.code === "AI_EMPTY" ||
+          e.code === "AI_PROVIDER_ERROR" ||
+          e.code === "AI_CONNECTION" ||
+          e.code === "AI_PROVIDER_RATE_LIMIT")
+      ) {
+        if (attempt)
+          throw new ApiError(
+            502,
+            "AI_TRANSIENT",
+            `模型临时不可用（${e.code}），已重试一次仍失败`,
+            { attempted: true },
+          );
+        continue;
+      }
+      throw e;
+    }
     try {
       return validate(parseJSON(response.message.content ?? ""));
     } catch (e) {

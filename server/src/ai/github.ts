@@ -85,12 +85,15 @@ async function download(url: string, headers: Record<string, string> = {}) {
         redirect: "error",
         signal: AbortSignal.timeout(30000),
       });
+      console.warn(
+        `[cms:daily:github] url=${url} status=${r.status} attempt=${attempt + 1}`,
+      );
       if (!r.ok) {
         await r.body?.cancel();
         throw new ApiError(
           502,
           "GITHUB_HTTP",
-          `GitHub 返回 HTTP ${r.status}，请检查服务可用性或 API 配额`,
+          `GitHub 返回 HTTP ${r.status}（${u.pathname}，第 ${attempt + 1} 次尝试），请检查服务可用性或 API 配额`,
         );
       }
       if (Number(r.headers.get("content-length")) > 16_000_000)
@@ -110,6 +113,10 @@ async function download(url: string, headers: Record<string, string> = {}) {
       }
       return Buffer.concat(chunks).toString("utf8");
     } catch (e) {
+      if (e instanceof ApiError && e.status === 502 && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1000 + 1000));
+        continue;
+      }
       if (e instanceof ApiError || attempt === 2)
         throw e instanceof ApiError
           ? e

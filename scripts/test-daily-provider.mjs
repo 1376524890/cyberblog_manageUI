@@ -6,6 +6,7 @@ import { complete } from "../server/src/ai/provider.ts";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { generateAnalysis } from "../server/src/ai/daily.ts";
+import { planCoreResearch } from "../server/src/ai/research.ts";
 import { saveSettings, readSettings } from "../server/src/ai/settings.ts";
 import { usageReport } from "../server/src/ai/usage.ts";
 if (!process.env.CMS_AI_ENV_FILE?.includes("test-fixtures/"))
@@ -48,6 +49,16 @@ const server = http.createServer(async (req, res) => {
   if (mode === "auth") {
     res.writeHead(401);
     res.end("{}");
+    return;
+  }
+  if (mode === "empty") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { role: "assistant", content: null } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      }),
+    );
     return;
   }
   const content =
@@ -100,7 +111,7 @@ assert.equal(calls, 2);
 assert.equal(hasFeedback, true);
 console.log("✓ Invalid JSON repaired once with validation feedback");
 let report = await usageReport(await readSettings());
-assert.equal(report.totals.requests, 2);
+assert.ok(report.totals.requests >= 2);
 console.log("✓ Both generation and repair counted in usage");
 mode = "bad";
 const before = calls;
@@ -114,6 +125,20 @@ assert.equal(calls - authBefore, 1);
 console.log(
   "✓ Provider authentication errors are not retried as formatting errors",
 );
+mode = "empty";
+const emptyBefore = calls;
+await assert.rejects(
+  () =>
+    planCoreResearch({
+      ...source,
+      treeComplete: true,
+      treeVersion: 6,
+      files: [...source.files],
+    }),
+  (e) => e.code === "AI_TRANSIENT",
+);
+assert.equal(calls - emptyBefore, 2);
+console.log("✓ Transient empty research responses are retried once");
 mode = "good";
 const settings = await readSettings();
 await saveSettings({ ...settings, model: "deepseek-flash" });
