@@ -102,6 +102,9 @@ export function composeBlogDraft(
 ): BlogDraft {
   const slug = `github-daily-${date}`;
   const names = projects.map((p) => p.source.name.split("/")[1]).join("、");
+  const selectedCover = projects
+    .flatMap((project) => project.source.readmeImages ?? [])
+    .find((image) => image.width && image.height && image.width >= image.height);
   return {
     slug,
     githubRepos: projects.map((p) => ({
@@ -113,6 +116,9 @@ export function composeBlogDraft(
       published: date,
       draft: false,
       description: `介绍 ${names} 等 ${projects.length} 个开源项目，讲解实际用途、使用方法与代码结构。`,
+      image: selectedCover
+        ? `./images/${slug}/readme-cover-${selectedCover.mimeType === "image/png" ? "png" : "jpg"}`
+        : "",
       category: "技术分享",
       series: DAILY_SERIES,
       seriesOrder: dailySeriesOrder(date),
@@ -150,7 +156,12 @@ export function checkBlogDraft(
     fail("正文仍含不需要的报告模板或嵌入式图表");
   if (
     draft.assets.length !==
-      projects.length + projects.reduce((n, p) => n + Math.min(p.source.readmeImages?.length ?? 0, 1), 0) ||
+      projects.length +
+        projects.reduce(
+          (n, p) => n + Math.min(p.source.readmeImages?.length ?? 0, 1),
+          0,
+        ) +
+        (draft.data.image ? 1 : 0) ||
     new Set(draft.assets.map((a) => a.name)).size !== draft.assets.length
   )
     fail("架构与 README 图片数量或文件名不完整");
@@ -158,7 +169,7 @@ export function checkBlogDraft(
     ...text.matchAll(/!\[[^\]]*\]\(\.\/images\/([^/]+)\/([^)]*\.(?:png|jpg))\)/g),
   ];
   if (
-    refs.length !== draft.assets.length ||
+    refs.length !== draft.assets.length - (draft.data.image ? 1 : 0) ||
     refs.some(
       (r) => r[1] !== draft.slug || !draft.assets.some((a) => a.name === r[2]),
     )

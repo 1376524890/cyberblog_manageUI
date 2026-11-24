@@ -22,7 +22,7 @@ import {
   nextRun,
   validateAnalysis,
 } from "../server/src/ai/daily.ts";
-import { DAILY_WORKFLOW, formatProject } from "../server/src/ai/blog-format.ts";
+import { DAILY_WORKFLOW, composeBlogDraft, formatProject } from "../server/src/ai/blog-format.ts";
 import { parseTrending, readmeImageUrls } from "../server/src/ai/github.ts";
 import { ApiError } from "../server/src/core/errors.ts";
 if (
@@ -270,6 +270,8 @@ const readmeProject = {
         url: "https://raw.githubusercontent.com/example/project/main/docs/ui.png",
         mimeType: "image/png",
         bytes: "aGkgcmVhZG1lIGltYWdl",
+        width: 1280,
+        height: 720,
         reason: "真实系统主界面",
         caption: "项目主界面截图",
         placement: "使用场景 界面",
@@ -300,6 +302,17 @@ check(
       },
     ],
   }).length === 2,
+);
+const coverDraft = composeBlogDraft(
+  "2026-10-30",
+  [readmeProject],
+  { lead: "开篇", closing: "结尾" },
+  [],
+);
+check(
+  "First qualified README screenshot becomes the daily cover",
+  coverDraft.data.image ===
+    "./images/github-daily-2026-10-30/readme-cover-png",
 );
 
 const dir = await fs.mkdtemp(

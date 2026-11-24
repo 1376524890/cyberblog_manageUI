@@ -672,6 +672,17 @@ export class DailyService {
         )) ?? (await this.deps.overview(run.date, introductions));
       await writeJSON(editionPath, { key: editionKey, edition });
       const draft = composeBlogDraft(run.date, projects, edition, assets);
+      const cover = projects
+        .flatMap((project) => project.source.readmeImages ?? [])
+        .find((image) => image.width && image.height && image.width >= image.height);
+      if (cover && !assets.some((asset) => asset.name.startsWith("readme-cover-"))) {
+        const extension = cover.mimeType === "image/png" ? "png" : "jpg";
+        assets.push({
+          name: `readme-cover-${extension}`,
+          data: cover.bytes,
+        });
+        draft.data.image = `./images/${draft.slug}/readme-cover-${extension}`;
+      }
       run.progress = `检查正文、标题和 ${projects.length} 张配图`;
       await this.persist();
       const quality = checkBlogDraft(draft, projects);
