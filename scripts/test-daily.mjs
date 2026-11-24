@@ -22,6 +22,7 @@ import {
   nextRun,
   validateAnalysis,
 } from "../server/src/ai/daily.ts";
+import { DAILY_WORKFLOW } from "../server/src/ai/blog-format.ts";
 import { parseTrending } from "../server/src/ai/github.ts";
 import { ApiError } from "../server/src/core/errors.ts";
 if (
@@ -648,6 +649,39 @@ check(
   upgradeWrites === 1 &&
     (await upgraded.status()).runs[0].attempts === 1 &&
     (await upgraded.status()).runs[0].state === "done",
+);
+const transientRetryDir = await fs.mkdtemp(
+  path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-transient-"),
+);
+await fs.writeFile(
+  path.join(transientRetryDir, "state.json"),
+  JSON.stringify({
+    enabled: true,
+    runs: [
+      {
+        date: upgradeDate,
+        state: "failed",
+        attempts: 3,
+        workflowVersion: DAILY_WORKFLOW.version,
+        startedAt: new Date(now.getTime() - 15 * 60000).toISOString(),
+        finishedAt: new Date(now.getTime() - 11 * 60000).toISOString(),
+        failure: { code: "GITHUB_HTTP" },
+      },
+    ],
+  }),
+);
+const transientRetry = new DailyService(transientRetryDir, deps);
+let transientWrites = 0;
+transientRetry.setWriter(async () => {
+  transientWrites++;
+});
+await transientRetry.tick();
+await transientRetry.wait();
+check(
+  "Scheduler retries same-version exhausted transient service failures",
+  transientWrites === 1 &&
+    (await transientRetry.status()).runs[0].attempts === 4 &&
+    (await transientRetry.status()).runs[0].state === "done",
 );
 const fallbackDir = await fs.mkdtemp(
   path.join(path.dirname(process.env.CMS_AI_ENV_FILE), "daily-fallback-"),

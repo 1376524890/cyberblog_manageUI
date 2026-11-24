@@ -693,6 +693,15 @@ export class DailyService {
       run.slug = draft.slug;
       run.progress = "文章已保存并自动推送";
     } catch (e) {
+      const transient = new Set([
+        "GITHUB_HTTP",
+        "GITHUB_NETWORK",
+        "AI_EMPTY",
+        "AI_TRANSIENT",
+        "AI_CONNECTION",
+        "AI_PROVIDER_ERROR",
+        "AI_PROVIDER_RATE_LIMIT",
+      ]);
       run.failure = {
         project: currentProject,
         stage: run.progress,
@@ -712,6 +721,13 @@ export class DailyService {
             : "任务失败，请检查 GitHub、模型服务或仓库状态后重试";
       if (currentProject) run.error = `${currentProject}：${run.error}`;
       run.progress = `生成未完成 · ${run.failure.stage}`;
+      if (
+        e instanceof ApiError &&
+        transient.has(e.code) &&
+        run.attempts < 3 &&
+        Date.now() - Date.parse(run.startedAt) >= 10 * 60000
+      )
+        run.progress = `生成未完成 · ${run.failure.stage} · 稍后将自动重试`;
     } finally {
       run.finishedAt = this.deps.now().toISOString();
       await this.persist();
@@ -732,12 +748,22 @@ export class DailyService {
         throw e;
       }
     }
+    const retryable = new Set([
+      "GITHUB_HTTP",
+      "GITHUB_NETWORK",
+      "AI_EMPTY",
+      "AI_TRANSIENT",
+      "AI_CONNECTION",
+      "AI_PROVIDER_ERROR",
+      "AI_PROVIDER_RATE_LIMIT",
+      "DISK_SPACE_LOW",
+    ]);
     if (
       last?.state === "done" ||
       (last &&
         ((last.workflowVersion === DAILY_WORKFLOW.version &&
           last.attempts >= 3 &&
-          last.failure?.code !== "DISK_SPACE_LOW") ||
+          !retryable.has(last.failure?.code ?? "")) ||
           now.getTime() -
             new Date(last.finishedAt ?? last.startedAt).getTime() <
             10 * 60000))
