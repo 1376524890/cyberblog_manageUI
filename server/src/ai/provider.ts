@@ -143,11 +143,15 @@ export async function complete(
         "AI_EMPTY",
         "模型未返回可用内容，请调整模型或请求",
       );
-    if (choice.finish_reason === "length")
+    if (choice.finish_reason === "length" && !message.content?.trim())
       throw new ApiError(
         422,
         "AI_TRUNCATED",
         "模型输出达到长度限制，未应用截断结果；请提高输出上限或缩短任务",
+      );
+    if (choice.finish_reason === "length")
+      console.warn(
+        `[cms:ai] finish_reason=length retained content=${message.content?.length ?? 0}`,
       );
     ok = true;
     return {
