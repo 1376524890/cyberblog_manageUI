@@ -4,7 +4,7 @@ import type { ImageAsset } from "../core/content-store.ts";
 import { ApiError } from "../core/errors.ts";
 
 export const DAILY_WORKFLOW = {
-  version: "qualified-candidates-auto-publish-v13",
+  version: "qualified-candidates-vision-publish-v14",
   writingStyle: "详细技术博客",
   figureFormat: "PNG",
   steps: [
@@ -15,6 +15,7 @@ export const DAILY_WORKFLOW = {
     "撰写博客正文",
     "生成架构图片",
     "审阅内容与主流程",
+    "评估 README 系统截图",
     "检查图文完整性",
     "保存非草稿文章并自动推送",
   ],
@@ -70,6 +71,27 @@ export function formatProject(article: ProjectArticle, slug: string) {
     0,
     `![${repo.name} 代码结构](./images/${slug}/${filename})`,
   );
+  const screenshotCount = Math.min(repo.readmeImages?.length ?? 0, 1);
+  for (let index = 0; index < screenshotCount; index++) {
+    const image = repo.readmeImages![index];
+    const insertAfter = Math.min(
+      paragraphs.length,
+      Math.max(
+        4,
+        a.paragraphs.findIndex((paragraph) =>
+          image.placement
+            .split(/[\s/、，,]+/)
+            .filter(Boolean)
+            .some((term) => term.length >= 2 && paragraph.includes(term)),
+      ) + 1 || 4,
+      ),
+    );
+    paragraphs.splice(
+      insertAfter,
+      0,
+      `![${line(image.caption)}](./images/${slug}/readme-${repo.rank}-${index + 1}.${image.mimeType === "image/png" ? "png" : "jpg"})`,
+    );
+  }
   return `## ${repo.rank}. ${line(shortName)}\n\n> ${line(tagline)}\n\n${meta.join(" · ")}\n\n${paragraphs.join("\n\n")}`;
 }
 export function composeBlogDraft(
@@ -127,15 +149,16 @@ export function checkBlogDraft(
   )
     fail("正文仍含不需要的报告模板或嵌入式图表");
   if (
-    draft.assets.length !== projects.length ||
-    new Set(draft.assets.map((a) => a.name)).size !== projects.length
+    draft.assets.length !==
+      projects.length + projects.reduce((n, p) => n + Math.min(p.source.readmeImages?.length ?? 0, 1), 0) ||
+    new Set(draft.assets.map((a) => a.name)).size !== draft.assets.length
   )
-    fail("架构图片数量或文件名不完整");
+    fail("架构与 README 图片数量或文件名不完整");
   const refs = [
-    ...text.matchAll(/!\[[^\]]*\]\(\.\/images\/([^/]+)\/([^)]*\.png)\)/g),
+    ...text.matchAll(/!\[[^\]]*\]\(\.\/images\/([^/]+)\/([^)]*\.(?:png|jpg))\)/g),
   ];
   if (
-    refs.length !== projects.length ||
+    refs.length !== draft.assets.length ||
     refs.some(
       (r) => r[1] !== draft.slug || !draft.assets.some((a) => a.name === r[2]),
     )
@@ -152,13 +175,18 @@ export function checkBlogDraft(
   }
   for (const asset of draft.assets) {
     const buffer = Buffer.from(asset.data, "base64");
+    const png = buffer.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
+    const jpg =
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[buffer.length - 2] === 0xff &&
+      buffer[buffer.length - 1] === 0xd9;
     if (
-      buffer.length < 24 ||
-      buffer.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" ||
-      buffer.readUInt32BE(16) < 1000 ||
-      buffer.readUInt32BE(20) < 200
+      buffer.length < 1000 ||
+      !(png || jpg) ||
+      (png && (buffer.readUInt32BE(16) < 1000 || buffer.readUInt32BE(20) < 200))
     )
-      fail("架构图不是有效的高清 PNG");
+      fail("配图不是有效的高清 PNG/JPG");
   }
   return {
     workflowVersion: DAILY_WORKFLOW.version,

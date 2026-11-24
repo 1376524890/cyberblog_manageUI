@@ -22,8 +22,8 @@ import {
   nextRun,
   validateAnalysis,
 } from "../server/src/ai/daily.ts";
-import { DAILY_WORKFLOW } from "../server/src/ai/blog-format.ts";
-import { parseTrending } from "../server/src/ai/github.ts";
+import { DAILY_WORKFLOW, formatProject } from "../server/src/ai/blog-format.ts";
+import { parseTrending, readmeImageUrls } from "../server/src/ai/github.ts";
 import { ApiError } from "../server/src/core/errors.ts";
 if (
   !process.env.CMS_REPO_PATH?.includes("test-fixtures/") ||
@@ -259,6 +259,47 @@ check(
     nineNodeMetadata.width === 1920 &&
     nineNodeMetadata.height === nineNodeSvg.height * 2 &&
     nineNodeMetadata.height <= 3200,
+);
+const readmeProject = {
+  source: {
+    ...makeEvidence(ranking[0]),
+    name: "example/project",
+    rank: 1,
+    readmeImages: [
+      {
+        url: "https://raw.githubusercontent.com/example/project/main/docs/ui.png",
+        mimeType: "image/png",
+        bytes: "aGkgcmVhZG1lIGltYWdl",
+        reason: "真实系统主界面",
+        caption: "项目主界面截图",
+        placement: "使用场景 界面",
+      },
+    ],
+  },
+  analysis: makeAnalysis(),
+  filename: "01-project-architecture.png",
+};
+const formattedReadme = formatProject(readmeProject, "github-daily-2026-10-30");
+check(
+  "Selected README screenshot is inserted after matching prose",
+  formattedReadme.includes(
+    "![项目主界面截图](./images/github-daily-2026-10-30/readme-1-1.png)",
+  ) &&
+    formattedReadme.indexOf("项目主界面截图") >
+      formattedReadme.indexOf("这个项目把常见"),
+);
+check(
+  "README badge and logo URLs are filtered before review",
+  readmeImageUrls({
+    ...makeEvidence(ranking[0]),
+    files: [
+      {
+        path: "README.md",
+        text: "![stars](https://img.shields.io/github/stars/a/b)\n![ui](docs/ui.png)\n<img src=\"logo.svg\">",
+        url: "",
+      },
+    ],
+  }).length === 2,
 );
 
 const dir = await fs.mkdtemp(

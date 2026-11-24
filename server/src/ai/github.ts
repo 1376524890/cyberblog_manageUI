@@ -15,6 +15,16 @@ export interface Evidence extends RankedRepo {
   treeVersion?: number;
   researchDiagnostics?: unknown;
   treeComplete?: boolean;
+  readmeImages?: {
+    url: string;
+    mimeType: string;
+    bytes: string;
+    width?: number;
+    height?: number;
+    reason: string;
+    caption: string;
+    placement: string;
+  }[];
   corePlan?: {
     focus: string;
     mainFlow: string[];
@@ -125,6 +135,39 @@ async function download(url: string, headers: Record<string, string> = {}) {
               "GITHUB_NETWORK",
               "GitHub 连接失败或响应超限，请稍后重试",
             );
+    }
+  }
+  throw new Error("unreachable");
+}
+async function downloadImage(url: string) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": "CyberBlog-Daily/1.0" },
+        redirect: "error",
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const type = response.headers.get("content-type")?.split(";")[0] ?? "";
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(type))
+        throw new Error(`unsupported content type ${type}`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length < 1000 || buffer.length > 3 * 1024 * 1024)
+        throw new Error("image size outside allowed range");
+      return { buffer, mimeType: type };
+    } catch (e) {
+      if (attempt === 2)
+        throw new ApiError(
+          502,
+          "README_IMAGE",
+          `README 图片下载失败：${e instanceof Error ? e.message : String(e)}`,
+        );
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt * 1000 + 1000),
+      );
     }
   }
   throw new Error("unreachable");
@@ -335,6 +378,52 @@ export async function readPublicRepoFile(source: Evidence, file: string) {
   if (!text || text.includes("\0"))
     throw new ApiError(502, "DAILY_EVIDENCE", "源码页面未提供可读取文本");
   return { path: file, text: text.slice(0, 18000), url };
+}
+
+export function readmeImageUrls(source: Evidence) {
+  const readme = source.files.find((f) => /^readme/i.test(f.path));
+  if (!readme) return [];
+  const urls = [
+    ...[...readme.text.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(
+      (m) => m[1],
+    ),
+    ...[...readme.text.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
+      (m) => m[1],
+    ),
+  ];
+  const absolute = urls.map((url) => {
+    if (/^https?:\/\//i.test(url)) return url;
+    const clean = url.replace(/^[.\/]+/, "");
+    return `https://raw.githubusercontent.com/${source.name}/${source.sha}/${clean
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+  });
+  return [
+    ...new Map(
+      absolute
+        .filter(
+          (url) =>
+            !/(?:^|\b)(?:img\.shields\.io|api\.iconify\.design|trendshift\.io|badgen\.net|badge\.furama\.dev)(?:$|\/)/i.test(
+              url,
+            ),
+        )
+        .map((url) => [url, url]),
+    ).keys(),
+  ].slice(0, 8);
+}
+
+export async function readPublicRepoImage(_source: Evidence, url: string) {
+  const parsed = new URL(url);
+  if (
+    !["github.com", "raw.githubusercontent.com", "githubusercontent.com"].some(
+      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`),
+    ) ||
+    parsed.protocol !== "https:"
+  )
+    throw new ApiError(422, "README_IMAGE", "图片来源不在允许的 GitHub 域内");
+  const bytes = await downloadImage(url);
+  return bytes;
 }
 
 export async function completeSourceTree(source: Evidence): Promise<Evidence> {

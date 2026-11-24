@@ -22,6 +22,7 @@ import {
   type BlogQuality,
 } from "./blog-format.ts";
 import { renderArchitecturePNG } from "./architecture.ts";
+import { reviewReadmeImages } from "./research.ts";
 import type { ImageAsset } from "../core/content-store.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -528,6 +529,24 @@ export class DailyService {
               mode: 0o600,
             });
             assets.push({ name: filename, data: png.toString("base64") });
+            run.progress = `${repo.rank}/${run.ranking!.length} ${repo.name} · 评估 README 系统截图`;
+            await this.persist();
+            ev.readmeImages = await reviewReadmeImages(ev);
+            await writeJSON(evPath, ev);
+            await writeJSON(path.join(projectDir, "source.json"), ev);
+            for (const [index, image] of ev.readmeImages.slice(0, 1).entries()) {
+              const extension = image.mimeType === "image/png" ? "png" : "jpg";
+              const imageFilename = `readme-${repo.rank}-${index + 1}.${extension}`;
+              await fs.writeFile(
+                path.join(cacheDir, imageFilename),
+                Buffer.from(image.bytes, "base64"),
+                { mode: 0o600 },
+              );
+              assets.push({
+                name: imageFilename,
+                data: image.bytes,
+              });
+            }
             introductions.push({
               name: repo.name,
               headline: a.headline,

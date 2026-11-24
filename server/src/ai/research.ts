@@ -10,9 +10,13 @@ import { ApiError } from "../core/errors.ts";
 import { complete, parseJSON, requireAI, type Message } from "./provider.ts";
 import {
   completeSourceTree,
+  readmeImageUrls,
+  readPublicRepoImage,
   readPublicRepoFile,
   type Evidence,
 } from "./github.ts";
+import sharp from "sharp";
+import { completeVision } from "./provider.ts";
 import type { Analysis } from "./daily.ts";
 
 const planSchema = z.object({
@@ -35,6 +39,20 @@ const reviewSchema = z.object({
   grounded: z.boolean(),
   blogVoice: z.boolean(),
   issues: z.array(z.string().max(500)).max(8),
+});
+const readmeImageSchema = z.object({
+  selected: z.array(z.number().int().min(0)).max(2),
+  images: z
+    .array(
+      z.object({
+        index: z.number().int().min(0),
+        suitable: z.boolean(),
+        reason: z.string().min(2).max(300),
+        caption: z.string().min(2).max(120),
+        placement: z.string().min(2).max(120),
+      }),
+    )
+    .max(8),
 });
 async function structured<T>(
   messages: Message[],
@@ -326,4 +344,63 @@ export async function reviewCoreResult(source: Evidence, analysis: Analysis) {
     checks: verdict,
     reviewedAt: new Date().toISOString(),
   };
+}
+
+export async function reviewReadmeImages(source: Evidence) {
+  try {
+    const urls = readmeImageUrls(source);
+    if (!urls.length) return [];
+    const candidates = [];
+    for (const url of urls) {
+      try {
+        const image = await readPublicRepoImage(source, url);
+        const metadata = await sharp(image.buffer).metadata();
+        if (!metadata.width || !metadata.height) continue;
+        if (metadata.width < 640 || metadata.height < 360) continue;
+        const aspect = metadata.width / metadata.height;
+        if (aspect < 1 || aspect > 2.4) continue;
+        candidates.push({
+          url,
+          mimeType: image.mimeType,
+          bytes: image.buffer.toString("base64"),
+          width: metadata.width,
+          height: metadata.height,
+        });
+      } catch (e) {
+        console.warn(
+          `[cms:daily:image] skipped url=${url} reason=${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (candidates.length === 6) break;
+    }
+    if (!candidates.length) return [];
+    const settings = await requireAI();
+    const prompt = `评估这些 README 截图是否值得插入中文技术博客。只选择真实产品界面/工作流/系统示意图；拒绝徽章、logo、广告、二维码、动画帧、模糊截图或与内容弱相关的图。每张图返回 suitable、reason、caption（中文图注）、placement（建议放在哪类段落后）。最后返回 selected 数组，最多两张；没有合适图则空数组。只返回 JSON。`;
+    const content = await completeVision(
+      settings,
+      prompt,
+      candidates.map(({ mimeType, bytes }) => ({ mimeType, bytes })),
+    );
+    const verdict = readmeImageSchema.parse(parseJSON(content));
+    const reviews = new Map(verdict.images.map((item) => [item.index, item]));
+    return candidates
+      .map((candidate, index) => {
+        const review = reviews.get(index);
+        if (!review?.suitable || !verdict.selected.includes(index)) return null;
+        return {
+          ...candidate,
+          bytes: candidate.bytes,
+          reason: review.reason,
+          caption: review.caption,
+          placement: review.placement,
+        };
+      })
+      .filter((image): image is NonNullable<typeof image> => image !== null)
+      .slice(0, 2);
+  } catch (e) {
+    console.warn(
+      `[cms:daily:image] review unavailable repo=${source.name} reason=${e instanceof Error ? e.message : String(e)}`,
+    );
+    return [];
+  }
 }

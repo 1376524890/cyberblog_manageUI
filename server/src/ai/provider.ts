@@ -194,6 +194,37 @@ export async function complete(
     });
   }
 }
+
+export async function completeVision(
+  s: AISettings,
+  prompt: string,
+  images: { mimeType: string; bytes: string }[],
+) {
+  const result = await providerRequest(s, "chat/completions", {
+    model: s.model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          ...images.map((image) => ({
+            type: "image_url",
+            image_url: { url: `data:${image.mimeType};base64,${image.bytes}` },
+          })),
+        ],
+      },
+    ],
+    stream: false,
+    store: false,
+    max_tokens: 1200,
+    temperature: 0,
+    thinking: { type: "disabled" },
+  });
+  const content = result.choices?.[0]?.message?.content;
+  if (!content)
+    throw new ApiError(502, "AI_EMPTY", "模型未返回可用图片判断");
+  return content;
+}
 export function parseJSON(text: string) {
   const raw = text
     .trim()

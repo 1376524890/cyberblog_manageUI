@@ -197,16 +197,31 @@ export function buildArchitectureSVG(repo: string, a: Architecture) {
     } else if (to.y > from.y) {
       const midY = snap((source.y + target.y) / 2);
       path = `M ${source.x} ${source.y} V ${midY} H ${target.x} V ${target.y}`;
-      labelX = target.x - 100;
-      labelY = midY - 15;
-    } else {
+      labelX = Math.min(
+        Math.max(Math.max(source.x, target.x), marginX + 80),
+        width - marginX - 200,
+      );
+      labelY = midY - 15 + (edgeIndex % 2) * 18;
+    } else if (to.row === from.row + 1) {
       const side = Math.min(
         width - 20,
         from.x + cardW + 16 + (edgeIndex % 3) * 20,
       );
       path = `M ${from.x + cardW} ${from.y + cardH / 2} H ${side} V ${target.y + cardH / 2} H ${to.x + cardW + 7}`;
-      labelX = (side + to.x + cardW) / 2 - 100;
+      labelX = Math.min(
+        Math.max((side + to.x + cardW) / 2 - 100, marginX + 8),
+        width - marginX - 208,
+      );
       labelY = target.y + cardH / 2 - 14;
+    } else {
+      const lane = rowTops[from.row] + cardH + 12 + (edgeIndex % 2) * 12;
+      const side = width - 20 - (edgeIndex % 3) * 20;
+      path = `M ${from.x + cardW} ${from.y + cardH / 2} H ${side} V ${lane} H ${to.x + cardW / 2} V ${target.y}`;
+      labelX = Math.min(
+        Math.max((side + to.x + cardW / 2) / 2 - 100, marginX + 8),
+        width - marginX - 208,
+      );
+      labelY = lane - 15;
     }
     geometries.push(
       `<path d="${path}" fill="none" stroke="${palette.ink}" stroke-opacity="0.66" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#arrow)"/>`,
