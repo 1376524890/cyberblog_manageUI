@@ -5,7 +5,7 @@ import {
 import { complete } from "../server/src/ai/provider.ts";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { generateAnalysis } from "../server/src/ai/daily.ts";
+import { generateAnalysis, generateOverview } from "../server/src/ai/daily.ts";
 import { planCoreResearch } from "../server/src/ai/research.ts";
 import { saveSettings, readSettings } from "../server/src/ai/settings.ts";
 import { usageReport } from "../server/src/ai/usage.ts";
@@ -36,6 +36,7 @@ const analysis = {
   edges: [{ from: 0, to: 1, label: "调用", evidence: "src/main.ts" }],
 };
 let calls = 0,
+  overviewCalls = 0,
   mode = "repair",
   hasFeedback = false,
   lastRequest = null;
@@ -56,6 +57,27 @@ const server = http.createServer(async (req, res) => {
     res.end(
       JSON.stringify({
         choices: [{ finish_reason: "stop", message: { role: "assistant", content: null } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      }),
+    );
+    return;
+  }
+  if (mode === "overview") {
+    overviewCalls++;
+    const content =
+      overviewCalls === 1
+        ? "not valid JSON"
+        : JSON.stringify({
+            title: "开源精选 2026-10-30",
+            lead: "开发中的许多麻烦，都可以从开源项目里找到细致的解法。这些项目覆盖不同场景，但共同点是文档、实现和工具链都足够具体，适合放回自己的开发环境继续研究。".repeat(2),
+            closing: "把这些设计放回自己的开发环境，便能找到适合继续研究的方向。".repeat(3),
+          });
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        choices: [
+          { finish_reason: "stop", message: { role: "assistant", content } },
+        ],
         usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       }),
     );
@@ -125,6 +147,19 @@ assert.equal(calls - authBefore, 1);
 console.log(
   "✓ Provider authentication errors are not retried as formatting errors",
 );
+mode = "overview";
+const overviewBefore = overviewCalls;
+const edition = await generateOverview("2026-10-30", [
+  {
+    name: "example/repo",
+    headline: "Example repo for daily edition",
+    opening: "开发中的许多麻烦，都可以从开源项目里找到细致的解法。",
+  },
+]);
+assert.equal(overviewCalls - overviewBefore, 2);
+assert.equal(hasFeedback, true);
+assert.equal(edition.title, "开源精选 2026-10-30");
+console.log("✓ Invalid overview JSON is repaired once with feedback");
 mode = "empty";
 const emptyBefore = calls;
 await assert.rejects(

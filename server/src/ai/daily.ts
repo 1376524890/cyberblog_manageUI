@@ -931,30 +931,58 @@ export async function generateOverview(
   projects: { name: string; headline: string; opening: string }[],
 ): Promise<Edition> {
   const settings = await requireAI();
-  const result = await complete(
-    { ...settings, maxTokens: Math.min(settings.maxTokens, 2048) },
-    [
-      {
-        role: "system",
-        content: `为一篇介绍 ${projects.length} 个开源项目的中文博客写标题、开篇与结尾。用自然、有具体内容的技术博客语言，自然引出各自的用途，不强行概括共同理念，避免套话。没有AI功能的项目不要归类为AI代理，也不要把所有项目都说成模型产品。不要报告口吻、方法说明、免责声明、AI身份或生成流程。不再逐项复述正文。只返回JSON {"title":"标题，含日期但不夸张","lead":"约150至250字的开篇","closing":"约100至180字的自然收尾"}。${DAILY_WRITING_BRIEF}`,
-      },
-      { role: "user", content: JSON.stringify({ date, projects }) },
-    ],
-    undefined,
-    undefined,
-    "daily",
-  );
-  const edition = z
-    .object({
-      title: z.string().min(5).max(100),
-      lead: z.string().min(70).max(1200),
-      closing: z.string().min(50).max(900),
-    })
-    .parse(parseJSON(result.message.content ?? ""));
-  validateBlogProse(
-    edition.lead + "\n" + edition.closing,
-    new Set(projects.map((p) => canonicalURL(`https://github.com/${p.name}`))),
-  );
-  return edition;
+  const messages: Message[] = [
+    {
+      role: "system",
+      content: `为一篇介绍 ${projects.length} 个开源项目的中文博客写标题、开篇与结尾。用自然、有具体内容的技术博客语言，自然引出各自的用途，不强行概括共同理念，避免套话。没有AI功能的项目不要归类为AI代理，也不要把所有项目都说成模型产品。不要报告口吻、方法说明、免责声明、AI身份或生成流程。不再逐项复述正文。只返回JSON {"title":"标题，含日期但不夸张","lead":"约150至250字的开篇","closing":"约100至180字的自然收尾"}。${DAILY_WRITING_BRIEF}`,
+    },
+    { role: "user", content: JSON.stringify({ date, projects }) },
+  ];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await complete(
+      { ...settings, maxTokens: Math.min(settings.maxTokens, 4096) },
+      messages,
+      undefined,
+      undefined,
+      "daily",
+    );
+    try {
+      const edition = z
+        .object({
+          title: z.string().min(5).max(100),
+          lead: z.string().min(70).max(1200),
+          closing: z.string().min(50).max(900),
+        })
+        .parse(parseJSON(result.message.content ?? ""));
+      validateBlogProse(
+        edition.lead + "\n" + edition.closing,
+        new Set(
+          projects.map((p) => canonicalURL(`https://github.com/${p.name}`)),
+        ),
+      );
+      return edition;
+    } catch (e) {
+      if (attempt)
+        throw e instanceof ApiError
+          ? e
+          : new ApiError(422, "DAILY_MODEL_SHAPE", "日报开篇与收尾生成失败");
+      if (!(e instanceof ApiError || e instanceof z.ZodError)) throw e;
+      const feedback =
+        e instanceof z.ZodError
+          ? e.issues
+              .slice(0, 5)
+              .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+              .join("；")
+          : e.message;
+      messages.push(
+        { role: "assistant", content: result.message.content },
+        {
+          role: "user",
+          content: `请修正结果，仅返回完整 JSON，不要添加解释。校验反馈：${feedback}`,
+        },
+      );
+    }
+  }
+  throw new ApiError(422, "DAILY_MODEL_SHAPE", "日报开篇与收尾生成失败");
 }
 export const daily = new DailyService();
